@@ -25,6 +25,7 @@
 
 /* includes ------------------------------------------------------------------*/
 #include "at32f45x_int.h"
+#include "motor_encoder.h"
 
 /** @addtogroup AT32F455_periph_examples
   * @{
@@ -129,6 +130,51 @@ void PendSV_Handler(void)
   */
 void SysTick_Handler(void)
 {
+}
+
+/* PC4 对应左编码器 A 相。 */
+void EXINT4_IRQHandler(void)
+{
+  if(exint_interrupt_flag_get(EXINT_LINE_4) != RESET)
+  {
+    exint_flag_clear(EXINT_LINE_4);
+    motor_encoder_left_edge_handler();
+  }
+}
+
+/* EXINT5~7 分别对应左 B 相、右 A 相和右 B 相。 */
+void EXINT9_5_IRQHandler(void)
+{
+  confirm_state left_changed = FALSE;
+  confirm_state right_changed = FALSE;
+
+  if(exint_interrupt_flag_get(EXINT_LINE_5) != RESET)
+  {
+    exint_flag_clear(EXINT_LINE_5);
+    left_changed = TRUE;
+  }
+
+  if(exint_interrupt_flag_get(EXINT_LINE_6) != RESET)
+  {
+    exint_flag_clear(EXINT_LINE_6);
+    right_changed = TRUE;
+  }
+
+  if(exint_interrupt_flag_get(EXINT_LINE_7) != RESET)
+  {
+    exint_flag_clear(EXINT_LINE_7);
+    right_changed = TRUE;
+  }
+
+  if(left_changed != FALSE)
+  {
+    motor_encoder_left_edge_handler();
+  }
+
+  if(right_changed != FALSE)
+  {
+    motor_encoder_right_edge_handler();
+  }
 }
 
 /**

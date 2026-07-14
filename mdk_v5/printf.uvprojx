@@ -403,6 +403,51 @@
               <FileType>1</FileType>
               <FilePath>..\src\bmi270_test.c</FilePath>
             </File>
+            <File>
+              <FileName>motor_driver.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_driver.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_driver_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_driver_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_speed_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_speed_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_pid.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_pid.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_speed_pid_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_speed_pid_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_open_loop_map_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_open_loop_map_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_encoder.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_encoder.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_encoder_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_encoder_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_current.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_current.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

@@ -4,14 +4,14 @@
   * @brief    主程序入口
   *
   * main.c 只负责系统初始化和主循环调度。
-  * BMI270 的通信、初始化、数据计算和串口输出统一放在 bmi270_test.c 中，
-  * 这样主程序保持干净，后面再测试其他模块时也更容易拆分。
+  * 当前运行电机速度闭环 PID 测试，具体逻辑统一放在 motor_speed_pid_test.c 中，
+  * 主程序只负责系统初始化和测试任务调度。
   **************************************************************************
   */
 
 #include "at32f45x_board.h"
 #include "at32f45x_clock.h"
-#include "bmi270_test.h"
+#include "motor_speed_pid_test.h"
 
 int main(void)
 {
@@ -24,12 +24,12 @@ int main(void)
   /* 初始化调试串口，后续 printf 会从 USART1 输出。 */
   uart_print_init(115200);
 
-  /* 初始化 BMI270 测试模块。 */
-  bmi270_test_init();
+  /* 初始化电机速度闭环 PID 测试，上电后会先等待 3 秒。 */
+  motor_speed_pid_test_init();
 
   while(1)
   {
-    /* 周期读取 BMI270，并以 roll,pitch,yaw 格式输出给 VOFA。 */
-    bmi270_test_loop();
+    /* 执行左右电机速度 PID，并输出目标、实测速度和 PWM。 */
+    motor_speed_pid_test_loop();
   }
 }
