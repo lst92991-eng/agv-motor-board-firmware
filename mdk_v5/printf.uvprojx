@@ -325,7 +325,7 @@
             <wLevel>2</wLevel>
             <uThumb>0</uThumb>
             <uSurpInc>0</uSurpInc>
-            <uC99>0</uC99>
+            <uC99>1</uC99>
             <uGnu>0</uGnu>
             <useXO>0</useXO>
             <v6Lang>1</v6Lang>
@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>AT32F455ZET7,USE_STDPERIPH_DRIVER,AT_START_F455_V1</Define>
               <Undefine></Undefine>
-              <IncludePath>..\libraries\drivers\inc;..\libraries\cmsis\cm4\core_support;..\libraries\cmsis\cm4\device_support;..\inc;..\at32f45x_board</IncludePath>
+              <IncludePath>..\src;..\libraries\drivers\inc;..\libraries\cmsis\cm4\core_support;..\libraries\cmsis\cm4\device_support;..\inc;..\at32f45x_board;..\third_party\bosch_bmi270</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -398,6 +398,11 @@
               <FileType>1</FileType>
               <FilePath>..\src\main.c</FilePath>
             </File>
+            <File>
+              <FileName>bmi270_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\bmi270_test.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -407,6 +412,21 @@
               <FileName>at32f45x_board.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\at32f45x_board\at32f45x_board.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>third_party</GroupName>
+          <Files>
+            <File>
+              <FileName>bmi2.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\bosch_bmi270\bmi2.c</FilePath>
+            </File>
+            <File>
+              <FileName>bmi270.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\bosch_bmi270\bmi270.c</FilePath>
             </File>
           </Files>
         </Group>

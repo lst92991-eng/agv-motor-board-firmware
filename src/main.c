@@ -1,66 +1,35 @@
 /**
   **************************************************************************
   * @file     main.c
-  * @brief    main program
-  **************************************************************************
+  * @brief    主程序入口
   *
-  * Copyright (c) 2025, Artery Technology, All rights reserved.
-  *
-  * The software Board Support Package (BSP) that is made available to
-  * download from Artery official website is the copyrighted work of Artery.
-  * Artery authorizes customers to use, copy, and distribute the BSP
-  * software and its related documentation for the purpose of design and
-  * development in conjunction with Artery microcontrollers. Use of the
-  * software is governed by this copyright notice and the following disclaimer.
-  *
-  * THIS SOFTWARE IS PROVIDED ON "AS IS" BASIS WITHOUT WARRANTIES,
-  * GUARANTEES OR REPRESENTATIONS OF ANY KIND. ARTERY EXPRESSLY DISCLAIMS,
-  * TO THE FULLEST EXTENT PERMITTED BY LAW, ALL EXPRESS, IMPLIED OR
-  * STATUTORY OR OTHER WARRANTIES, GUARANTEES OR REPRESENTATIONS,
-  * INCLUDING BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY,
-  * FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
-  *
+  * main.c 只负责系统初始化和主循环调度。
+  * BMI270 的通信、初始化、数据计算和串口输出统一放在 bmi270_test.c 中，
+  * 这样主程序保持干净，后面再测试其他模块时也更容易拆分。
   **************************************************************************
   */
 
 #include "at32f45x_board.h"
 #include "at32f45x_clock.h"
+#include "bmi270_test.h"
 
-/** @addtogroup AT32F455_periph_examples
-  * @{
-  */
-
-/** @addtogroup 455_USART_printf USART_printf
-  * @{
-  */
-
-__IO uint32_t time_cnt = 0;
-
-/**
-  * @brief  main function.
-  * @param  none
-  * @retval none
-  */
 int main(void)
 {
+  /* 配置系统时钟。当前工程按板载 12MHz 外部晶振配置。 */
   system_clock_config();
+
+  /* 初始化板级外设，例如延时函数和基础 GPIO。 */
   at32_board_init();
+
+  /* 初始化调试串口，后续 printf 会从 USART1 输出。 */
   uart_print_init(115200);
 
-  /* output a message on hyperterminal using printf function */
-  printf("usart printf example: retarget the c library printf function to the usart\r\n");
+  /* 初始化 BMI270 测试模块。 */
+  bmi270_test_init();
 
   while(1)
   {
-    printf("usart printf counter: %u\r\n",time_cnt++);
-    delay_sec(1);
+    /* 周期读取 BMI270，并以 roll,pitch,yaw 格式输出给 VOFA。 */
+    bmi270_test_loop();
   }
 }
-
-/**
-  * @}
-  */
-
-/**
-  * @}
-  */

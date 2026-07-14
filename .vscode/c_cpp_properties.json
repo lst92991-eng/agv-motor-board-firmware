@@ -3,17 +3,18 @@
         {
             "name": "printf_printf",
             "includePath": [
-                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_CH32\\libraries\\drivers\\inc",
-                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_CH32\\libraries\\cmsis\\cm4\\core_support",
-                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_CH32\\libraries\\cmsis\\cm4\\device_support",
-                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_CH32\\inc",
-                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_CH32\\at32f45x_board",
+                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_AT32\\src",
+                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_AT32\\libraries\\drivers\\inc",
+                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_AT32\\libraries\\cmsis\\cm4\\core_support",
+                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_AT32\\libraries\\cmsis\\cm4\\device_support",
+                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_AT32\\inc",
+                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_AT32\\at32f45x_board",
+                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_AT32\\third_party\\bosch_bmi270",
                 "C:\\Keil_v5\\Core\\ARM\\ARMCC\\include",
                 "C:\\Keil_v5\\Core\\ARM\\ARMCC\\include\\rw",
-                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_CH32\\src",
-                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_CH32\\libraries\\drivers\\src",
-                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_CH32\\libraries\\cmsis\\cm4\\device_support\\startup\\mdk",
-                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_CH32",
+                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_AT32\\libraries\\drivers\\src",
+                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_AT32\\libraries\\cmsis\\cm4\\device_support\\startup\\mdk",
+                "d:\\atguigu_work\\Code\\27_MagTrack\\AgileDrive_AT32",
                 "${default}"
             ],
             "defines": [
