@@ -25,6 +25,7 @@
 
 /* includes ------------------------------------------------------------------*/
 #include "at32f45x_int.h"
+#include "debug_uart_transport.h"
 #include "motor_encoder.h"
 
 /** @addtogroup AT32F455_periph_examples
@@ -96,11 +97,8 @@ void UsageFault_Handler(void)
   }
 }
 
-/**
-  * @brief  this function handles svcall exception.
-  * @param  none
-  * @retval none
-  */
+#if !defined(USE_FREERTOS)
+/* 未启用FreeRTOS时保留空的系统异常入口。 */
 void SVC_Handler(void)
 {
 }
@@ -131,8 +129,15 @@ void PendSV_Handler(void)
 void SysTick_Handler(void)
 {
 }
+#endif
 
-/* PC4 ��Ӧ������� A �ࡣ */
+/* USART1接收中断只搬运字节，协议解析在主循环中完成。 */
+void USART1_IRQHandler(void)
+{
+  debug_uart_transport_irq_handler();
+}
+
+/* PC4 对应左编码器 A 相。 */
 void EXINT4_IRQHandler(void)
 {
   if(exint_interrupt_flag_get(EXINT_LINE_4) != RESET)
@@ -142,7 +147,7 @@ void EXINT4_IRQHandler(void)
   }
 }
 
-/* EXINT5~7 �ֱ��Ӧ�� B �ࡢ�� A ����� B �ࡣ */
+/* EXINT5~7分别对应左B相、右A相和右B相。 */
 void EXINT9_5_IRQHandler(void)
 {
   confirm_state left_changed = FALSE;

@@ -1,0 +1,15 @@
+# 本地编辑器与代理配置
+.vscode/
+.agents/
+.claude/
+
+# Keil生成文件
+mdk_v5/objects/
+mdk_v5/listings/
+mdk_v5/*.uvguix.*
+mdk_v5/*.uvoptx
+
+# Python缓存与临时诊断资料
+__pycache__/
+*.pyc
+tmp/

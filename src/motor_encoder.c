@@ -19,10 +19,13 @@
 
 /* 若实车前进时某一侧计数为负，可把对应方向修正值改为 -1。 */
 #define MOTOR_LEFT_ENCODER_DIRECTION     1
-#define MOTOR_RIGHT_ENCODER_DIRECTION    1
+/* 右电机镜像安装，反相后左右编码器正计数都表示小车向前。 */
+#define MOTOR_RIGHT_ENCODER_DIRECTION   -1
 
 static volatile int32_t left_encoder_count;
 static volatile int32_t right_encoder_count;
+static volatile uint32_t left_invalid_transition_count;
+static volatile uint32_t right_invalid_transition_count;
 static uint8_t left_encoder_state;
 static uint8_t right_encoder_state;
 
@@ -75,10 +78,10 @@ void motor_encoder_init(void)
   crm_periph_clock_enable(CRM_GPIOC_PERIPH_CLOCK, TRUE);
   crm_periph_clock_enable(CRM_SCFG_PERIPH_CLOCK, TRUE);
 
-  /* 编码器通常为开漏或集电极开路输出，内部上拉可保证断线时电平稳定。 */
+  /* 当前编码器为5V推挽输出，GPIO不启用内部上拉，避免向3.3V电源回灌。 */
   gpio_default_para_init(&gpio_init_struct);
   gpio_init_struct.gpio_mode = GPIO_MODE_INPUT;
-  gpio_init_struct.gpio_pull = GPIO_PULL_UP;
+  gpio_init_struct.gpio_pull = GPIO_PULL_NONE;
   gpio_init_struct.gpio_pins = GPIO_PINS_4 | GPIO_PINS_5;
   gpio_init(GPIOC, &gpio_init_struct);
 
@@ -100,6 +103,8 @@ void motor_encoder_init(void)
   right_encoder_state = motor_encoder_read_right_state();
   left_encoder_count = 0;
   right_encoder_count = 0;
+  left_invalid_transition_count = 0U;
+  right_invalid_transition_count = 0U;
 
   nvic_irq_enable(EXINT4_IRQn, 2, 0);
   nvic_irq_enable(EXINT9_5_IRQn, 2, 1);
@@ -109,8 +114,13 @@ void motor_encoder_left_edge_handler(void)
 {
   uint8_t current_state = motor_encoder_read_left_state();
   uint8_t table_index = (uint8_t)((left_encoder_state << 2) | current_state);
+  int8_t step = quadrature_step_table[table_index];
 
-  left_encoder_count += quadrature_step_table[table_index] * MOTOR_LEFT_ENCODER_DIRECTION;
+  if((step == 0) && (current_state != left_encoder_state))
+  {
+    left_invalid_transition_count++;
+  }
+  left_encoder_count += step * MOTOR_LEFT_ENCODER_DIRECTION;
   left_encoder_state = current_state;
 }
 
@@ -118,8 +128,13 @@ void motor_encoder_right_edge_handler(void)
 {
   uint8_t current_state = motor_encoder_read_right_state();
   uint8_t table_index = (uint8_t)((right_encoder_state << 2) | current_state);
+  int8_t step = quadrature_step_table[table_index];
 
-  right_encoder_count += quadrature_step_table[table_index] * MOTOR_RIGHT_ENCODER_DIRECTION;
+  if((step == 0) && (current_state != right_encoder_state))
+  {
+    right_invalid_transition_count++;
+  }
+  right_encoder_count += step * MOTOR_RIGHT_ENCODER_DIRECTION;
   right_encoder_state = current_state;
 }
 
@@ -137,6 +152,20 @@ int32_t motor_encoder_get_count(motor_id_t motor)
   return 0;
 }
 
+uint32_t motor_encoder_get_invalid_transition_count(motor_id_t motor)
+{
+  if(motor == MOTOR_LEFT)
+  {
+    return left_invalid_transition_count;
+  }
+  if(motor == MOTOR_RIGHT)
+  {
+    return right_invalid_transition_count;
+  }
+
+  return 0U;
+}
+
 void motor_encoder_reset(motor_id_t motor)
 {
   uint32_t interrupt_state = __get_PRIMASK();
@@ -145,10 +174,12 @@ void motor_encoder_reset(motor_id_t motor)
   if(motor == MOTOR_LEFT)
   {
     left_encoder_count = 0;
+    left_invalid_transition_count = 0U;
   }
   else if(motor == MOTOR_RIGHT)
   {
     right_encoder_count = 0;
+    right_invalid_transition_count = 0U;
   }
 
   if(interrupt_state == 0U)
@@ -164,6 +195,8 @@ void motor_encoder_reset_all(void)
   __disable_irq();
   left_encoder_count = 0;
   right_encoder_count = 0;
+  left_invalid_transition_count = 0U;
+  right_invalid_transition_count = 0U;
   if(interrupt_state == 0U)
   {
     __enable_irq();

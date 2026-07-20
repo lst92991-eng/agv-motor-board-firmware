@@ -92,6 +92,11 @@ typedef enum
 #define PRINT_UART_TX_GPIO_CRM_CLK       CRM_GPIOA_PERIPH_CLOCK
 #define PRINT_UART_TX_PIN_SOURCE         GPIO_PINS_SOURCE9
 #define PRINT_UART_TX_PIN_MUX_NUM        GPIO_MUX_7
+#define PRINT_UART_RX_PIN                GPIO_PINS_10
+#define PRINT_UART_RX_GPIO               GPIOA
+#define PRINT_UART_RX_GPIO_CRM_CLK       CRM_GPIOA_PERIPH_CLOCK
+#define PRINT_UART_RX_PIN_SOURCE         GPIO_PINS_SOURCE10
+#define PRINT_UART_RX_PIN_MUX_NUM        GPIO_MUX_7
 
 /******************* define button *******************/
 typedef enum

@@ -18,6 +18,9 @@ void motor_encoder_init(void);
 /* 读取指定电机从上次清零开始累计的正交计数值。 */
 int32_t motor_encoder_get_count(motor_id_t motor);
 
+/* 读取AB相同时跳变等非法状态转换的累计次数。 */
+uint32_t motor_encoder_get_invalid_transition_count(motor_id_t motor);
+
 /* 清零指定电机的累计计数值。 */
 void motor_encoder_reset(motor_id_t motor);
 

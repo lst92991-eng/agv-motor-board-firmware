@@ -35,9 +35,6 @@
   * @{
   */
 
-/* delay macros */
-#define STEP_DELAY_MS                    50
-
 /* at-start led resouce array */
 gpio_type *led_gpio_port[LED_NUM]        = {LED2_GPIO, LED3_GPIO, LED4_GPIO};
 uint16_t led_gpio_pin[LED_NUM]           = {LED2_PIN, LED3_PIN, LED4_PIN};
@@ -45,7 +42,6 @@ crm_periph_clock_type led_gpio_crm_clk[LED_NUM] = {LED2_GPIO_CRM_CLK, LED3_GPIO_
 
 /* delay variable */
 static __IO uint32_t fac_us;
-static __IO uint32_t fac_ms;
 
 /* support printf function, usemicrolib is unnecessary */
 #if (__ARMCC_VERSION > 6000000)
@@ -138,6 +134,7 @@ void uart_print_init(uint32_t baudrate)
   /* enable the uart and gpio clock */
   crm_periph_clock_enable(PRINT_UART_CRM_CLK, TRUE);
   crm_periph_clock_enable(PRINT_UART_TX_GPIO_CRM_CLK, TRUE);
+  crm_periph_clock_enable(PRINT_UART_RX_GPIO_CRM_CLK, TRUE);
 
   gpio_default_para_init(&gpio_init_struct);
 
@@ -151,9 +148,18 @@ void uart_print_init(uint32_t baudrate)
 
   gpio_pin_mux_config(PRINT_UART_TX_GPIO, PRINT_UART_TX_PIN_SOURCE, PRINT_UART_TX_PIN_MUX_NUM);
 
+  /* PA10配置为USART1接收输入，供调试协议和后续统一运动命令使用。 */
+  gpio_init_struct.gpio_pins = PRINT_UART_RX_PIN;
+  gpio_init_struct.gpio_pull = GPIO_PULL_UP;
+  gpio_init(PRINT_UART_RX_GPIO, &gpio_init_struct);
+  gpio_pin_mux_config(PRINT_UART_RX_GPIO,
+                      PRINT_UART_RX_PIN_SOURCE,
+                      PRINT_UART_RX_PIN_MUX_NUM);
+
   /* configure uart param */
   usart_init(PRINT_UART, baudrate, USART_DATA_8BITS, USART_STOP_1_BIT);
   usart_transmitter_enable(PRINT_UART, TRUE);
+  usart_receiver_enable(PRINT_UART, TRUE);
   usart_enable(PRINT_UART, TRUE);
 }
 
@@ -319,10 +325,11 @@ void at32_led_toggle(led_type led)
   */
 void delay_init()
 {
-  /* configure systick */
-  systick_clock_source_config(SYSTICK_CLOCK_SOURCE_AHBCLK_NODIV);
+  /* 使用DWT实现微秒延时，SysTick完整交给FreeRTOS内核。 */
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0U;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
   fac_us = system_core_clock / (1000000U);
-  fac_ms = fac_us * (1000U);
 }
 
 /**
@@ -332,17 +339,19 @@ void delay_init()
   */
 void delay_us(uint32_t nus)
 {
-  uint32_t temp = 0;
-  SysTick->LOAD = (uint32_t)(nus * fac_us);
-  SysTick->VAL = 0x00;
-  SysTick->CTRL |= SysTick_CTRL_ENABLE_Msk ;
-  do
-  {
-    temp = SysTick->CTRL;
-  }while((temp & 0x01) && !(temp & (1 << 16)));
+  uint32_t start_cycle;
+  uint32_t wait_cycles;
 
-  SysTick->CTRL &= ~SysTick_CTRL_ENABLE_Msk;
-  SysTick->VAL = 0x00;
+  if(nus == 0U)
+  {
+    return;
+  }
+
+  start_cycle = DWT->CYCCNT;
+  wait_cycles = nus * fac_us;
+  while((uint32_t)(DWT->CYCCNT - start_cycle) < wait_cycles)
+  {
+  }
 }
 
 /**
@@ -352,28 +361,11 @@ void delay_us(uint32_t nus)
   */
 void delay_ms(uint16_t nms)
 {
-  uint32_t temp = 0;
-  while(nms)
+  /* 该阻塞延时只用于调度器启动前的传感器初始化。 */
+  while(nms != 0U)
   {
-    if(nms > STEP_DELAY_MS)
-    {
-      SysTick->LOAD = (uint32_t)(STEP_DELAY_MS * fac_ms);
-      nms -= STEP_DELAY_MS;
-    }
-    else
-    {
-      SysTick->LOAD = (uint32_t)(nms * fac_ms);
-      nms = 0;
-    }
-    SysTick->VAL = 0x00;
-    SysTick->CTRL |= SysTick_CTRL_ENABLE_Msk;
-    do
-    {
-      temp = SysTick->CTRL;
-    }while((temp & 0x01) && !(temp & (1 << 16)));
-
-    SysTick->CTRL &= ~SysTick_CTRL_ENABLE_Msk;
-    SysTick->VAL = 0x00;
+    delay_us(1000U);
+    nms--;
   }
 }
 

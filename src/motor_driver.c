@@ -20,6 +20,8 @@
 /* 20kHz 高于常见可听频率，电机低速运行时不会出现明显 PWM 啸叫。 */
 #define MOTOR_PWM_FREQUENCY_HZ          20000UL
 #define MOTOR_SPEED_MAX_PERMILLE        1000
+#define MOTOR_LEFT_OUTPUT_DIRECTION         1
+#define MOTOR_RIGHT_OUTPUT_DIRECTION       -1
 
 static uint32_t motor_pwm_period;
 
@@ -103,6 +105,7 @@ void motor_driver_init(void)
 
 void motor_driver_set_speed(motor_id_t motor, int16_t speed_permille)
 {
+  int16_t output_direction;
   uint16_t duty_permille;
   uint16_t decay_duty_permille;
 
@@ -119,6 +122,11 @@ void motor_driver_set_speed(motor_id_t motor, int16_t speed_permille)
   {
     speed_permille = -MOTOR_SPEED_MAX_PERMILLE;
   }
+
+  /* 右电机镜像安装，统一补偿后，正值始终表示车轮推动小车向前。 */
+  output_direction = (motor == MOTOR_LEFT) ? MOTOR_LEFT_OUTPUT_DIRECTION :
+                                             MOTOR_RIGHT_OUTPUT_DIRECTION;
+  speed_permille = (int16_t)(speed_permille * output_direction);
 
   if(speed_permille > 0)
   {

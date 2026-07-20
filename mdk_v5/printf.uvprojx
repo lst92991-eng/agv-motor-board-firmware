@@ -337,9 +337,9 @@
             <v6Rtti>0</v6Rtti>
             <VariousControls>
               <MiscControls></MiscControls>
-              <Define>AT32F455ZET7,USE_STDPERIPH_DRIVER,AT_START_F455_V1</Define>
+              <Define>AT32F455ZET7,USE_STDPERIPH_DRIVER,AT_START_F455_V1,USE_FREERTOS,USE_I2C_2V8</Define>
               <Undefine></Undefine>
-              <IncludePath>..\src;..\libraries\drivers\inc;..\libraries\cmsis\cm4\core_support;..\libraries\cmsis\cm4\device_support;..\inc;..\at32f45x_board;..\third_party\bosch_bmi270</IncludePath>
+              <IncludePath>..\src;..\libraries\drivers\inc;..\libraries\cmsis\cm4\core_support;..\libraries\cmsis\cm4\device_support;..\inc;..\at32f45x_board;..\third_party\bosch_bmi270;..\third_party\st_vl53l0x;..\third_party\freertos\include;..\third_party\freertos\portable\rvds\ARM_CM4F</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -399,9 +399,49 @@
               <FilePath>..\src\main.c</FilePath>
             </File>
             <File>
+              <FileName>app_freertos.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\app_freertos.c</FilePath>
+            </File>
+            <File>
+              <FileName>debug_uart_log.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\debug_uart_log.c</FilePath>
+            </File>
+            <File>
+              <FileName>motion_command.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motion_command.c</FilePath>
+            </File>
+            <File>
+              <FileName>debug_uart_transport.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\debug_uart_transport.c</FilePath>
+            </File>
+            <File>
+              <FileName>serial_motion_protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\serial_motion_protocol.c</FilePath>
+            </File>
+            <File>
+              <FileName>serial_command_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\serial_command_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>chassis_motion_controller.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\chassis_motion_controller.c</FilePath>
+            </File>
+            <File>
               <FileName>bmi270_test.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\bmi270_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>imu_heading.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\imu_heading.c</FilePath>
             </File>
             <File>
               <FileName>motor_driver.c</FileName>
@@ -434,6 +474,41 @@
               <FilePath>..\src\motor_open_loop_map_test.c</FilePath>
             </File>
             <File>
+              <FileName>motor_speed_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_speed_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>chassis_motion_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\chassis_motion_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>chassis_straight_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\chassis_straight_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_differential_load_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_differential_load_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>chassis_direction_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\chassis_direction_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>adc_monitor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\adc_monitor.c</FilePath>
+            </File>
+            <File>
+              <FileName>adc_voltage_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\adc_voltage_test.c</FilePath>
+            </File>
+            <File>
               <FileName>motor_encoder.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\motor_encoder.c</FilePath>
@@ -444,9 +519,34 @@
               <FilePath>..\src\motor_encoder_test.c</FilePath>
             </File>
             <File>
+              <FileName>left_motor_encoder_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\left_motor_encoder_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>dual_motor_encoder_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\dual_motor_encoder_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>left_motor_scope_forward_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\left_motor_scope_forward_test.c</FilePath>
+            </File>
+            <File>
               <FileName>motor_current.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\motor_current.c</FilePath>
+            </File>
+            <File>
+              <FileName>tof_i2c3.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\tof_i2c3.c</FilePath>
+            </File>
+            <File>
+              <FileName>tof_ir_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\tof_ir_test.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -472,6 +572,61 @@
               <FileName>bmi270.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\third_party\bosch_bmi270\bmi270.c</FilePath>
+            </File>
+            <File>
+              <FileName>vl53l0x_api.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\st_vl53l0x\vl53l0x_api.c</FilePath>
+            </File>
+            <File>
+              <FileName>vl53l0x_api_calibration.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\st_vl53l0x\vl53l0x_api_calibration.c</FilePath>
+            </File>
+            <File>
+              <FileName>vl53l0x_api_core.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\st_vl53l0x\vl53l0x_api_core.c</FilePath>
+            </File>
+            <File>
+              <FileName>vl53l0x_api_ranging.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\st_vl53l0x\vl53l0x_api_ranging.c</FilePath>
+            </File>
+            <File>
+              <FileName>vl53l0x_api_strings.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\st_vl53l0x\vl53l0x_api_strings.c</FilePath>
+            </File>
+            <File>
+              <FileName>vl53l0x_platform.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\st_vl53l0x\vl53l0x_platform.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>freertos</GroupName>
+          <Files>
+            <File>
+              <FileName>tasks.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\freertos\tasks.c</FilePath>
+            </File>
+            <File>
+              <FileName>list.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\freertos\list.c</FilePath>
+            </File>
+            <File>
+              <FileName>queue.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\freertos\queue.c</FilePath>
+            </File>
+            <File>
+              <FileName>port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\third_party\freertos\portable\rvds\ARM_CM4F\port.c</FilePath>
             </File>
           </Files>
         </Group>

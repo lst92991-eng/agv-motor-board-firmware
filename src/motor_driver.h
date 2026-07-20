@@ -30,7 +30,8 @@ void motor_driver_init(void);
 
 /*
  * 设置单个电机速度。
- * speed_permille 的范围为 -1000~1000，符号表示方向，绝对值表示 PWM 千分比。
+ * speed_permille 的范围为 -1000~1000，正值表示车轮推动小车向前，
+ * 负值表示车轮推动小车向后，绝对值表示 PWM 千分比。
  */
 void motor_driver_set_speed(motor_id_t motor, int16_t speed_permille);
 
