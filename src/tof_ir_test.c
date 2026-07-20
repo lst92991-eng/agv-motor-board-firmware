@@ -1,10 +1,12 @@
 /**
   *****************************************************************************
   * @file     tof_ir_test.c
-  * @brief    é–¸æ¬î„°L53L0Xæ¿æ‘îƒˆç»æ¶˜Ã¹ç€£î… æ§¸
+  * @brief    Ë«VL53L0X²â¾àÓë¼òµ¥ÂË²¨²âÊÔ
   *
-  * å¨‘æ’±å€“é–²æ·°L53L0Xå¨‘æ’³ï¹¦éæå´¥æ´ï½†ç•±å§’æ¶™îŸˆé¡“?å¨´ï½…ä¸2Cé–¸ï¸½æ¾˜å¨¼å†®æŸˆé‘ºãƒ¦Ğ¦0x52é–µå——å€¸é¨å«æ…¨ç€£î„î‡§é–ºå†­æ³›é˜æ¶¢å´¥çç‚¬î˜§é–¹å³°î˜®ç¼?  * XSHUTé–¿æ¶˜è‹¯éŸâ‚¬é—î‚£åŠ’é–²æ»ˆå´¬éŠˆå¤Šæ™ªæ¥ ç‚´æ¹¹é±ã„©å¼¨é–«æ¶œç¤‹0x54é–¸?x56é–¿æ¶˜çŸ‚æµ¼â•…å´—å®¥å‘®å‹¾é–¸Ñ€å“é–¸æ„¯å°™é›å©‡å¦´éŒæ¶™æ‹±æ¿æ‘îƒˆé¦îˆå¼³éŒæ¶™î˜§
-  * å¨‘æ’³ç§´é¨å«æ…¨ç€£î„î‡§é–¹å­˜ç‰é¡•ä¼´å´£éî‚¢î„¢å©¢èˆµç‰—ç”¯æ’®å¼¨ç’ºçƒ˜ç¤é–¿æ¶˜è‹¯è¤°Ñ„îš¥å®€å†ªæ§ˆç€¹é©ç®‘è¤°çª½OFé–»ã„¥å«°éˆ§î„çŸ®æ·‡å©‡å´ªå®€å†ªç©ç¼å‚œç²¯é†ç†¼å¹‘é¡”è¡¡å“?  *****************************************************************************
+  * Á½¸öVL53L0X¹²ÓÃÈí¼şI2C×ÜÏß£¬Ä¬ÈÏ8Î»µØÖ·¾ùÎª0x52¡£
+  * Í¨¹ıXSHUTÖğ¸ö»½ĞÑ²¢¸ÄÎª0x54ºÍ0x56£¬±ÜÃâµØÖ·³åÍ»¡£
+  * ÓĞĞ§¾àÀëÒÀ´Î¾­¹ı3µãÖĞÖµºÍÒ»½×µÍÍ¨ÂË²¨£¬ÓÃÓÚÒÖÖÆÅ¼·¢Ìø±ä¡£
+  *****************************************************************************
   */
 
 #include "tof_ir_test.h"
@@ -23,13 +25,149 @@
 #define TOF_RIGHT_ADDRESS                   0x56U
 #define TOF_MODEL_ID_REGISTER               0xC0U
 #define TOF_EXPECTED_MODEL_ID               0xEEU
+#define TOF_INVALID_DISTANCE_MM             8190U
+#define TOF_DOCK_REFERENCE_LEFT_MM             43L
+#define TOF_DOCK_REFERENCE_RIGHT_MM            26L
+#define TOF_DOCK_ZERO_DEADBAND_MM                5L
+#define TOF_FILTER_SAMPLE_COUNT                3U
+#define TOF_FILTER_LOW_PASS_DIVISOR            4L
+#define TOF_FILTER_FIXED_POINT_SHIFT            8
 #define TOF_RETRY_DELAY_MS                   1000U
 #define TOF_OUTPUT_DELAY_MS                    50U
+
+typedef struct
+{
+  uint16_t samples[TOF_FILTER_SAMPLE_COUNT];
+  uint8_t sample_count;
+  uint8_t next_index;
+  uint8_t initialized;
+  int32_t filtered_q8;
+} tof_distance_filter_t;
 
 static VL53L0X_Dev_t tof_left_device;
 static VL53L0X_Dev_t tof_right_device;
 static VL53L0X_Error tof_left_init_status;
 static VL53L0X_Error tof_right_init_status;
+static tof_distance_filter_t tof_left_filter;
+static tof_distance_filter_t tof_right_filter;
+
+static uint16_t tof_median3(uint16_t first,
+                            uint16_t second,
+                            uint16_t third)
+{
+  if(first > second)
+  {
+    uint16_t temporary = first;
+    first = second;
+    second = temporary;
+  }
+  if(second > third)
+  {
+    uint16_t temporary = second;
+    second = third;
+    third = temporary;
+  }
+  if(first > second)
+  {
+    second = first;
+  }
+
+  return second;
+}
+
+static uint16_t tof_filter_update(tof_distance_filter_t *filter,
+                                  uint16_t distance_mm)
+{
+  uint16_t median_mm;
+  int32_t target_q8;
+
+  filter->samples[filter->next_index] = distance_mm;
+  filter->next_index++;
+  if(filter->next_index >= TOF_FILTER_SAMPLE_COUNT)
+  {
+    filter->next_index = 0U;
+  }
+  if(filter->sample_count < TOF_FILTER_SAMPLE_COUNT)
+  {
+    filter->sample_count++;
+  }
+
+  if(filter->sample_count == 1U)
+  {
+    median_mm = filter->samples[0];
+  }
+  else if(filter->sample_count == 2U)
+  {
+    median_mm = (uint16_t)(((uint32_t)filter->samples[0] +
+                            (uint32_t)filter->samples[1]) / 2U);
+  }
+  else
+  {
+    median_mm = tof_median3(filter->samples[0],
+                            filter->samples[1],
+                            filter->samples[2]);
+  }
+
+  target_q8 = (int32_t)median_mm << TOF_FILTER_FIXED_POINT_SHIFT;
+  if(filter->initialized == 0U)
+  {
+    filter->filtered_q8 = target_q8;
+    filter->initialized = 1U;
+  }
+  else
+  {
+    filter->filtered_q8 +=
+      (target_q8 - filter->filtered_q8) / TOF_FILTER_LOW_PASS_DIVISOR;
+  }
+
+  return (uint16_t)((filter->filtered_q8 +
+                     (1L << (TOF_FILTER_FIXED_POINT_SHIFT - 1))) >>
+                    TOF_FILTER_FIXED_POINT_SHIFT);
+}
+
+static uint16_t tof_filter_last(const tof_distance_filter_t *filter)
+{
+  if(filter->initialized == 0U)
+  {
+    return 0U;
+  }
+
+  return (uint16_t)((filter->filtered_q8 +
+                     (1L << (TOF_FILTER_FIXED_POINT_SHIFT - 1))) >>
+                    TOF_FILTER_FIXED_POINT_SHIFT);
+}
+
+static int32_t tof_apply_zero_deadband(int32_t value_mm)
+{
+  if((value_mm >= -TOF_DOCK_ZERO_DEADBAND_MM) &&
+     (value_mm <= TOF_DOCK_ZERO_DEADBAND_MM))
+  {
+    return 0L;
+  }
+
+  return value_mm;
+}
+
+static uint8_t tof_measurement_is_valid(
+  const VL53L0X_RangingMeasurementData_t *measurement,
+  VL53L0X_Error api_status)
+{
+  if((api_status != VL53L0X_ERROR_NONE) ||
+     (measurement->RangeStatus != 0U) ||
+     (measurement->RangeMilliMeter == 0U) ||
+     (measurement->RangeMilliMeter >= TOF_INVALID_DISTANCE_MM))
+  {
+    return 0U;
+  }
+
+  return 1U;
+}
+
+static void tof_filter_reset_all(void)
+{
+  memset(&tof_left_filter, 0, sizeof(tof_left_filter));
+  memset(&tof_right_filter, 0, sizeof(tof_right_filter));
+}
 
 static void tof_gpio_init(void)
 {
@@ -39,7 +177,7 @@ static void tof_gpio_init(void)
   crm_periph_clock_enable(CRM_GPIOB_PERIPH_CLOCK, TRUE);
   crm_periph_clock_enable(CRM_GPIOH_PERIPH_CLOCK, TRUE);
 
-  /* XSHUTå¨´ï½…æµ·éæç®éæ’å½ é—‚å‚¤åºç»±å •å¹‡é”é”‹ç¤é–¿æ¶˜è‹¯é˜æ¶šæ‹‹é“Ñ…æ‚é‰å ŸæŒ¸é¤î…¢å´é“åº¡æ™™é–¸æ‘æ´¦å®•çªPIOæ¿¡îˆ—â‚¬å´‡ç¡€é–µ?*/
+  /* ³õÊ¼»¯Ê±ÏÈÀ­µÍÁ½¸öXSHUT£¬±£Ö¤Á½¸ö´«¸ĞÆ÷²»»áÍ¬Ê±Õ¼ÓÃÄ¬ÈÏµØÖ·¡£ */
   gpio_bits_reset(GPIOB, GPIO_PINS_11);
   gpio_bits_reset(GPIOA, GPIO_PINS_11);
   gpio_default_para_init(&gpio_init_struct);
@@ -51,7 +189,7 @@ static void tof_gpio_init(void)
   gpio_init(GPIOB, &gpio_init_struct);
   gpio_init(GPIOA, &gpio_init_struct);
 
-  /* GP_Lé–µå—•ç¬©P_Ré–ºå¤Šã˜ç»—å‚šî†é‘¼î„‚ç—…é–º?.7kå¨‘æ’³ï¹¥æ¿¯æ´ªæ•çè‚©ç®½é–¹é•æ¤’ç’ç†·Ã¹é¡”é”¯æ•„é–ºä½¹æ¾˜é¡Ñ„æ½é¾å†²å¼³é–µ?*/
+  /* Á½Â·GPIO1ÓÉ´«¸ĞÆ÷°åÍâ²¿ÉÏÀ­£¬MCU¶Ë²»ÆôÓÃÄÚ²¿ÉÏÀ­¡£ */
   gpio_default_para_init(&gpio_init_struct);
   gpio_init_struct.gpio_mode = GPIO_MODE_INPUT;
   gpio_init_struct.gpio_pull = GPIO_PULL_NONE;
@@ -141,7 +279,8 @@ static VL53L0X_Error tof_initialize_one(VL53L0X_Dev_t *device,
 
 static void tof_initialize_both(void)
 {
-  /* å¨‘æ’±å€“é–²æ»ˆå´³éŠŠã‚†î‚½éŸ«å›§æ‡˜éŠ†å¿›å´—é«æ¿‡å€±é–ºå†­æ³›é™Ñ‡æ¢»é¡“ã„§ç¤‰é–¸æ°¾ç®‘é¨îˆ›îœ€å¦¯æ¬¾å‡é–¸ï¸½æ¾˜å¨¼?x52å¨´å…¼è‰¾è¤°å‚æ‚½é”å³°æš±ç¼æ„ªé™éˆ§?*/
+  /* Ã¿´ÎÖØĞÂ³õÊ¼»¯´«¸ĞÆ÷Ê±Í¬²½Çå¿Õ¾ÉÂË²¨×´Ì¬¡£ */
+  tof_filter_reset_all();
   tof_set_shutdown(0U, 0U);
   delay_ms(10U);
 
@@ -151,7 +290,7 @@ static void tof_initialize_both(void)
                                             TOF_LEFT_ADDRESS,
                                             "LEFT");
 
-  /* ç€¹é©ç¼šé…èˆµå¾„æˆî‚¥Ğ•é–ºå†¨å¢é´é£ç´’é¡“æ¿ˆç®½é–¹é•ç¤é™é¹ƒå´—é“î‚£ç„½é–¿æ¶˜çŸ‚æµ¼â•…å´—å®¥å‘¯æšŠå¨´çŠ®å„µç»®îˆœæ‹‹éŠˆå‘®å‹¾é–¸Ñ€å“æ¥ ç‚²å¼¶æ¾¹å ¥å´£éå‘®æ« é–»æ¬˜å‰›éæ¶¢å¹’éŠï¼„ã‚´é–µ?*/
+  /* ×ó²à¸ÄÖ·Íê³Éºó±£³ÖÉÏµç£¬ÔÙ»½ĞÑÓÒ²à²¢ĞŞ¸ÄÓÒ²àµØÖ·¡£ */
   tof_set_shutdown((tof_left_init_status == VL53L0X_ERROR_NONE) ? 1U : 0U,
                    1U);
   delay_ms(10U);
@@ -169,8 +308,10 @@ static void tof_print_bus_diagnostics(void)
   int32_t last_error;
 
   tof_i2c3_get_diagnostics(&scl_level, &sda_level, &last_error);
-  left_shutdown = (gpio_input_data_bit_read(GPIOB, GPIO_PINS_11) != RESET) ? 1U : 0U;
-  right_shutdown = (gpio_input_data_bit_read(GPIOA, GPIO_PINS_11) != RESET) ? 1U : 0U;
+  left_shutdown =
+    (gpio_input_data_bit_read(GPIOB, GPIO_PINS_11) != RESET) ? 1U : 0U;
+  right_shutdown =
+    (gpio_input_data_bit_read(GPIOA, GPIO_PINS_11) != RESET) ? 1U : 0U;
   printf("TOF_BUS,scl=%u,sda=%u,xshut_l=%u,xshut_r=%u,i2c_error=%d\r\n",
          scl_level,
          sda_level,
@@ -183,11 +324,20 @@ void tof_ir_test_init(void)
 {
   tof_gpio_init();
   tof_i2c3_init();
+  tof_filter_reset_all();
 
-  printf("\r\nTOF_TEST,VL53L0X_LEFT_RIGHT\r\n");
-  printf("TOF_HEADER,left_mm,left_range_status,left_api,"
-         "right_mm,right_range_status,right_api,gp_left,gp_right\r\n");
-  printf("TOF_EXPECT,api_0_and_range_status_0_are_valid\r\n");
+  printf("\r\nTOF_TEST,VL53L0X_LEFT_RIGHT_FILTERED\r\n");
+  printf("TOF_HEADER,left_raw_mm,left_filtered_mm,left_valid,"
+         "right_raw_mm,right_filtered_mm,right_valid,diff_mm,pair_valid,"
+         "dock_distance_error_mm,alignment_error_mm,"
+         "left_range_status,right_range_status,left_api,right_api,"
+         "gp_left,gp_right\r\n");
+  printf("TOF_EXPECT,valid_requires_api_0_range_status_0_and_range_1_to_8189\r\n");
+  printf("TOF_REFERENCE,left_mm=%ld,right_mm=%ld,diff_mm=%ld,deadband_mm=%ld\r\n",
+         TOF_DOCK_REFERENCE_LEFT_MM,
+         TOF_DOCK_REFERENCE_RIGHT_MM,
+         TOF_DOCK_REFERENCE_LEFT_MM - TOF_DOCK_REFERENCE_RIGHT_MM,
+         TOF_DOCK_ZERO_DEADBAND_MM);
   tof_print_bus_diagnostics();
   tof_initialize_both();
 }
@@ -198,6 +348,14 @@ void tof_ir_test_loop(void)
   VL53L0X_RangingMeasurementData_t right_data;
   VL53L0X_Error left_status;
   VL53L0X_Error right_status;
+  uint16_t left_filtered_mm;
+  uint16_t right_filtered_mm;
+  int32_t filtered_difference_mm = 0L;
+  int32_t dock_distance_error_mm = 0L;
+  int32_t alignment_error_mm = 0L;
+  uint8_t left_valid;
+  uint8_t right_valid;
+  uint8_t pair_valid;
   uint8_t gp_left;
   uint8_t gp_right;
 
@@ -221,15 +379,68 @@ void tof_ir_test_loop(void)
   right_status = VL53L0X_PerformSingleRangingMeasurement(&tof_right_device,
                                                          &right_data);
 
-  gp_left = (gpio_input_data_bit_read(GPIOH, GPIO_PINS_3) != RESET) ? 1U : 0U;
-  gp_right = (gpio_input_data_bit_read(GPIOA, GPIO_PINS_12) != RESET) ? 1U : 0U;
+  left_valid = tof_measurement_is_valid(&left_data, left_status);
+  right_valid = tof_measurement_is_valid(&right_data, right_status);
 
-  printf("TOF,%u,%u,%d,%u,%u,%d,%u,%u\r\n",
+  if(left_valid != 0U)
+  {
+    left_filtered_mm = tof_filter_update(&tof_left_filter,
+                                         left_data.RangeMilliMeter);
+  }
+  else
+  {
+    /* ÎŞĞ§²âÁ¿²»½øÈëÂË²¨Æ÷£¬ÂË²¨Öµ½ö±£ÁôÓÃÓÚÕï¶Ï¡£ */
+    left_filtered_mm = tof_filter_last(&tof_left_filter);
+  }
+
+  if(right_valid != 0U)
+  {
+    right_filtered_mm = tof_filter_update(&tof_right_filter,
+                                          right_data.RangeMilliMeter);
+  }
+  else
+  {
+    /* ÒµÎñ²ã±ØĞë½áºÏright_validÅĞ¶Ï£¬²»ÄÜ°Ñ±£ÁôÖµµ±×÷ĞÂ²âÁ¿¡£ */
+    right_filtered_mm = tof_filter_last(&tof_right_filter);
+  }
+
+  pair_valid = ((left_valid != 0U) && (right_valid != 0U)) ? 1U : 0U;
+  if(pair_valid != 0U)
+  {
+    int32_t left_residual_mm;
+    int32_t right_residual_mm;
+
+    filtered_difference_mm = (int32_t)left_filtered_mm -
+                             (int32_t)right_filtered_mm;
+    left_residual_mm = (int32_t)left_filtered_mm -
+                       TOF_DOCK_REFERENCE_LEFT_MM;
+    right_residual_mm = (int32_t)right_filtered_mm -
+                        TOF_DOCK_REFERENCE_RIGHT_MM;
+    dock_distance_error_mm =
+      tof_apply_zero_deadband((left_residual_mm + right_residual_mm) / 2L);
+    alignment_error_mm =
+      tof_apply_zero_deadband(left_residual_mm - right_residual_mm);
+  }
+
+  gp_left =
+    (gpio_input_data_bit_read(GPIOH, GPIO_PINS_3) != RESET) ? 1U : 0U;
+  gp_right =
+    (gpio_input_data_bit_read(GPIOA, GPIO_PINS_12) != RESET) ? 1U : 0U;
+
+  printf("TOF,%u,%u,%u,%u,%u,%u,%ld,%u,%ld,%ld,%u,%u,%d,%d,%u,%u\r\n",
          left_data.RangeMilliMeter,
-         left_data.RangeStatus,
-         left_status,
+         left_filtered_mm,
+         left_valid,
          right_data.RangeMilliMeter,
+         right_filtered_mm,
+         right_valid,
+         filtered_difference_mm,
+         pair_valid,
+         dock_distance_error_mm,
+         alignment_error_mm,
+         left_data.RangeStatus,
          right_data.RangeStatus,
+         left_status,
          right_status,
          gp_left,
          gp_right);
