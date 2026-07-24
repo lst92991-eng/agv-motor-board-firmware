@@ -22,7 +22,7 @@
 #include "left_motor_scope_forward_test.h"
 #elif (APP_ACTIVE_MODE == APP_MODE_RIGHT_MOTOR_SCOPE_FORWARD_TEST)
 #include "right_motor_scope_forward_test.h"
-#elif (APP_ACTIVE_MODE == APP_MODE_AT32F456_REPLACEMENT_TEST)
+#elif (APP_ACTIVE_MODE == APP_MODE_BOARD_BRINGUP_TEST)
 #include "at32f456_replacement_test.h"
 #elif (APP_ACTIVE_MODE == APP_MODE_RIGHT_MOTOR_ENCODER_ADC_TEST)
 #include "right_motor_encoder_adc_test.h"
@@ -38,7 +38,7 @@
 
 int main(void)
 {
-#if (APP_ACTIVE_MODE == APP_MODE_AT32F456_REPLACEMENT_TEST)
+#if (APP_ACTIVE_MODE == APP_MODE_BOARD_BRINGUP_TEST)
   /* 换芯自检使用可回退的时钟配置，避免外晶振异常时串口完全无输出。 */
   at32f456_replacement_clock_config();
 #else
@@ -50,7 +50,7 @@ int main(void)
   nvic_priority_group_config(NVIC_PRIORITY_GROUP_4);
 
   /* 换芯自检不使用官方开发板LED和按键映射，避免驱动自定义板上的其他网络。 */
-#if (APP_ACTIVE_MODE == APP_MODE_AT32F456_REPLACEMENT_TEST)
+#if (APP_ACTIVE_MODE == APP_MODE_BOARD_BRINGUP_TEST)
   delay_init();
 #else
   /* 初始化板级外设，例如延时函数和基础 GPIO。 */
@@ -100,8 +100,8 @@ int main(void)
   {
     right_motor_scope_forward_test_loop();
   }
-#elif (APP_ACTIVE_MODE == APP_MODE_AT32F456_REPLACEMENT_TEST)
-  /* 换芯自检覆盖核心资源和常用外设，电机始终保持停止。 */
+#elif (APP_ACTIVE_MODE == APP_MODE_BOARD_BRINGUP_TEST)
+  /* 新板上电自检覆盖核心资源和常用外设，电机始终保持停止。 */
   at32f456_replacement_test_init();
   for(;;)
   {

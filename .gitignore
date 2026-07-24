@@ -1,15 +1,20 @@
-# æœ¬åœ°ç¼–è¾‘å™¨ä¸ä»£ç†é…ç½®
+# ±¾µØ±à¼­Æ÷Óë´úÀíÅäÖÃ
 .vscode/
 .agents/
 .claude/
+.codex/
 
-# Keilç”Ÿæˆæ–‡ä»¶
+# KeilÉú³ÉÎÄ¼ş
 mdk_v5/objects/
 mdk_v5/listings/
 mdk_v5/*.uvguix.*
 mdk_v5/*.uvoptx
+mdk_v5/*.log
 
-# Pythonç¼“å­˜ä¸ä¸´æ—¶è¯Šæ–­èµ„æ–™
+# Í¨ÓÃ¹¹½¨ÓëÁÙÊ±Ä¿Â¼
+build/
+tmp/
+
+# Python»º´æ
 __pycache__/
 *.pyc
-tmp/

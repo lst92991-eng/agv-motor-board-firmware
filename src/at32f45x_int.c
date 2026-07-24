@@ -25,6 +25,7 @@
 
 /* includes ------------------------------------------------------------------*/
 #include "at32f45x_int.h"
+#include "bumper_input.h"
 #include "debug_uart_transport.h"
 #include "motor_encoder.h"
 
@@ -98,7 +99,7 @@ void UsageFault_Handler(void)
 }
 
 #if !defined(USE_FREERTOS)
-/* æœªå¯ç”¨FreeRTOSæ—¶ä¿ç•™ç©ºçš„ç³»ç»Ÿå¼‚å¸¸å…¥å£ã€‚ */
+/* Î´ÆôÓÃFreeRTOSÊ±±£Áô¿ÕµÄÏµÍ³Òì³£Èë¿Ú¡£ */
 void SVC_Handler(void)
 {
 }
@@ -131,13 +132,13 @@ void SysTick_Handler(void)
 }
 #endif
 
-/* USART1æ¥æ”¶ä¸­æ–­åªæ¬è¿å­—èŠ‚ï¼Œåè®®è§£æåœ¨ä¸»å¾ªç¯ä¸­å®Œæˆã€‚ */
+/* USART1½ÓÊÕÖĞ¶ÏÖ»°áÔË×Ö½Ú£¬Ğ­Òé½âÎöÔÚÖ÷Ñ­»·ÖĞÍê³É¡£ */
 void USART1_IRQHandler(void)
 {
   debug_uart_transport_irq_handler();
 }
 
-/* PC4 å¯¹åº”å·¦ç¼–ç å™¨ A ç›¸ã€‚ */
+/* PC4¶ÔÓ¦×ó±àÂëÆ÷AÏà¡£ */
 void EXINT4_IRQHandler(void)
 {
   if(exint_interrupt_flag_get(EXINT_LINE_4) != RESET)
@@ -147,11 +148,12 @@ void EXINT4_IRQHandler(void)
   }
 }
 
-/* EXINT5~7åˆ†åˆ«å¯¹åº”å·¦Bç›¸ã€å³Aç›¸å’Œå³Bç›¸ã€‚ */
+/* EXINT5~7·Ö±ğ¶ÔÓ¦×óBÏà¡¢ÓÒAÏàºÍÓÒBÏà¡£ */
 void EXINT9_5_IRQHandler(void)
 {
   confirm_state left_changed = FALSE;
   confirm_state right_changed = FALSE;
+  uint8_t bumper_changed = 0U;
 
   if(exint_interrupt_flag_get(EXINT_LINE_5) != RESET)
   {
@@ -171,6 +173,12 @@ void EXINT9_5_IRQHandler(void)
     right_changed = TRUE;
   }
 
+  if(exint_interrupt_flag_get(EXINT_LINE_9) != RESET)
+  {
+    exint_flag_clear(EXINT_LINE_9);
+    bumper_changed |= BUMPER_INPUT_RIGHT_MASK;
+  }
+
   if(left_changed != FALSE)
   {
     motor_encoder_left_edge_handler();
@@ -179,6 +187,40 @@ void EXINT9_5_IRQHandler(void)
   if(right_changed != FALSE)
   {
     motor_encoder_right_edge_handler();
+  }
+
+  if(bumper_changed != 0U)
+  {
+    bumper_input_edge_irq_handler(bumper_changed);
+  }
+}
+
+/* PC13¡¢PC14ºÍPC15·Ö±ğ¶ÔÓ¦×ó¡¢ºó¡¢Ç°·À×²Ìõ¡£ */
+void EXINT15_10_IRQHandler(void)
+{
+  uint8_t bumper_changed = 0U;
+
+  if(exint_interrupt_flag_get(EXINT_LINE_13) != RESET)
+  {
+    exint_flag_clear(EXINT_LINE_13);
+    bumper_changed |= BUMPER_INPUT_LEFT_MASK;
+  }
+
+  if(exint_interrupt_flag_get(EXINT_LINE_14) != RESET)
+  {
+    exint_flag_clear(EXINT_LINE_14);
+    bumper_changed |= BUMPER_INPUT_REAR_MASK;
+  }
+
+  if(exint_interrupt_flag_get(EXINT_LINE_15) != RESET)
+  {
+    exint_flag_clear(EXINT_LINE_15);
+    bumper_changed |= BUMPER_INPUT_FRONT_MASK;
+  }
+
+  if(bumper_changed != 0U)
+  {
+    bumper_input_edge_irq_handler(bumper_changed);
   }
 }
 
