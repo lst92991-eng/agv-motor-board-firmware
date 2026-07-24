@@ -14,15 +14,15 @@
       <uAC6>0</uAC6>
       <TargetOption>
         <TargetCommonOption>
-          <Device>AT32F455ZET7</Device>
+          <Device>AT32F456RCT7</Device>
           <Vendor>ArteryTek</Vendor>
           <PackID>ArteryTek.AT32F45x_DFP.2.0.1</PackID>
-          <Cpu>IRAM(0x20000000,0x24000) IROM(0x08000000,0x80000) CPUTYPE("Cortex-M4") FPU2 CLOCK(12000000) ELITTLE</Cpu>
+          <Cpu>IRAM(0x20000000,0x1B000) IROM(0x08000000,0x40000) CPUTYPE("Cortex-M4") FPU2 CLOCK(12000000) ELITTLE</Cpu>
           <FlashUtilSpec></FlashUtilSpec>
           <StartupFile></StartupFile>
           <FlashDriverDll></FlashDriverDll>
           <DeviceId>0</DeviceId>
-          <RegisterFile>$$Device:AT32F455ZET7$Device\Include\at32f45x.h</RegisterFile>
+          <RegisterFile>$$Device:AT32F456RCT7$Device\Include\at32f45x.h</RegisterFile>
           <MemoryEnv></MemoryEnv>
           <Cmp></Cmp>
           <Asm></Asm>
@@ -32,7 +32,7 @@
           <SLE66CMisc></SLE66CMisc>
           <SLE66AMisc></SLE66AMisc>
           <SLE66LinkerMisc></SLE66LinkerMisc>
-          <SFDFile>$$Device:AT32F455ZET7$SVD\AT32F455xx_v2.svd</SFDFile>
+          <SFDFile>$$Device:AT32F456RCT7$SVD\AT32F456xx_v2.svd</SFDFile>
           <bCustSvd>0</bCustSvd>
           <UseEnv>0</UseEnv>
           <BinPath></BinPath>
@@ -246,12 +246,12 @@
               <IRAM>
                 <Type>0</Type>
                 <StartAddress>0x20000000</StartAddress>
-                <Size>0x24000</Size>
+                <Size>0x1b000</Size>
               </IRAM>
               <IROM>
                 <Type>1</Type>
                 <StartAddress>0x8000000</StartAddress>
-                <Size>0x80000</Size>
+                <Size>0x40000</Size>
               </IROM>
               <XRAM>
                 <Type>0</Type>
@@ -276,7 +276,7 @@
               <OCR_RVCT4>
                 <Type>1</Type>
                 <StartAddress>0x8000000</StartAddress>
-                <Size>0x80000</Size>
+                <Size>0x40000</Size>
               </OCR_RVCT4>
               <OCR_RVCT5>
                 <Type>1</Type>
@@ -301,7 +301,7 @@
               <OCR_RVCT9>
                 <Type>0</Type>
                 <StartAddress>0x20000000</StartAddress>
-                <Size>0x24000</Size>
+                <Size>0x1b000</Size>
               </OCR_RVCT9>
               <OCR_RVCT10>
                 <Type>0</Type>
@@ -337,7 +337,7 @@
             <v6Rtti>0</v6Rtti>
             <VariousControls>
               <MiscControls></MiscControls>
-              <Define>AT32F455ZET7,USE_STDPERIPH_DRIVER,AT_START_F455_V1,USE_FREERTOS,USE_I2C_2V8</Define>
+              <Define>AT32F456RCT7,USE_STDPERIPH_DRIVER,AT_START_F456_V1,USE_FREERTOS,USE_I2C_2V8</Define>
               <Undefine></Undefine>
               <IncludePath>..\src;..\libraries\drivers\inc;..\libraries\cmsis\cm4\core_support;..\libraries\cmsis\cm4\device_support;..\inc;..\at32f45x_board;..\third_party\bosch_bmi270;..\third_party\st_vl53l0x;..\third_party\freertos\include;..\third_party\freertos\portable\rvds\ARM_CM4F</IncludePath>
             </VariousControls>
@@ -534,6 +534,26 @@
               <FilePath>..\src\left_motor_scope_forward_test.c</FilePath>
             </File>
             <File>
+              <FileName>right_motor_scope_forward_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\right_motor_scope_forward_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>at32f456_replacement_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\at32f456_replacement_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>right_motor_encoder_adc_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\right_motor_encoder_adc_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>canfd_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\canfd_test.c</FilePath>
+            </File>
+            <File>
               <FileName>motor_current.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\motor_current.c</FilePath>
@@ -547,6 +567,31 @@
               <FileName>tof_ir_test.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\tof_ir_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>pn532_uart5.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\pn532_uart5.c</FilePath>
+            </File>
+            <File>
+              <FileName>rfid_record.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\rfid_record.c</FilePath>
+            </File>
+            <File>
+              <FileName>rfid_reader_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\rfid_reader_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>bumper_input.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\bumper_input.c</FilePath>
+            </File>
+            <File>
+              <FileName>bumper_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\bumper_test.c</FilePath>
             </File>
           </Files>
         </Group>
