@@ -1,9 +1,9 @@
 /**
   **************************************************************************
   * @file     main.c
-  * @brief    ���������
+  * @brief    主程序入口
   *
-  * main.cֻ����Ӳ����ʼ����������app_mode.hѡ������Ӧ�û�����ԡ�
+  * main.c只负责硬件初始化，并按照app_mode.h选择正常应用或单项测试。
   **************************************************************************
   */
 
@@ -28,10 +28,14 @@
 #include "right_motor_encoder_adc_test.h"
 #elif (APP_ACTIVE_MODE == APP_MODE_CANFD_TEST)
 #include "canfd_test.h"
+#elif (APP_ACTIVE_MODE == APP_MODE_MOTOR_SPEED_TUNING_TEST)
+#include "motor_speed_tuning_test.h"
 #elif (APP_ACTIVE_MODE == APP_MODE_RFID_READER_TEST)
 #include "rfid_reader_test.h"
 #elif (APP_ACTIVE_MODE == APP_MODE_BUMPER_TEST)
 #include "bumper_test.h"
+#elif (APP_ACTIVE_MODE == APP_MODE_CANFD_BUMPER_TEST)
+#include "canfd_bumper_test.h"
 #else
 #include "tof_ir_test.h"
 #endif
@@ -39,32 +43,32 @@
 int main(void)
 {
 #if (APP_ACTIVE_MODE == APP_MODE_BOARD_BRINGUP_TEST)
-  /* ��о�Լ�ʹ�ÿɻ��˵�ʱ�����ã������⾧���쳣ʱ������ȫ������� */
+  /* 换芯自检使用可回退的时钟配置，避免外晶振异常时串口完全无输出。 */
   at32f456_replacement_clock_config();
 #else
-  /* ����ϵͳʱ�ӡ���ǰ���̰����� 12MHz �ⲿ�������á� */
+  /* 配置系统时钟。当前工程按板载 12MHz 外部晶振配置。 */
   system_clock_config();
 #endif
 
-  /* FreeRTOSҪ��ȫ��4�����ȼ�λ��������ռ���ȼ��� */
+  /* FreeRTOS要求全部4个优先级位都用于抢占优先级。 */
   nvic_priority_group_config(NVIC_PRIORITY_GROUP_4);
 
-  /* ��о�Լ첻ʹ�ùٷ�������LED�Ͱ���ӳ�䣬���������Զ�����ϵ��������硣 */
+  /* 换芯自检不使用官方开发板LED和按键映射，避免驱动自定义板上的其他网络。 */
 #if (APP_ACTIVE_MODE == APP_MODE_BOARD_BRINGUP_TEST)
   delay_init();
 #else
-  /* ��ʼ���弶���裬������ʱ�����ͻ��� GPIO�� */
+  /* 初始化板级外设，例如延时函数和基础 GPIO。 */
   at32_board_init();
 #endif
 
-  /* ��ʼ�����Դ��ڣ����� printf ��� USART1 ����� */
+  /* 初始化调试串口，后续 printf 会从 USART1 输出。 */
   uart_print_init(115200);
 
 #if (APP_ACTIVE_MODE == APP_MODE_CHASSIS_CONTROL)
-  /* ����������ǰ��ɵ������������BMI270��̬��ʼ���� */
+  /* 调度器启动前完成电机、编码器和BMI270静态初始化。 */
   chassis_motion_controller_init();
 
-  /* ������̬����������кʹ��ڻ������� */
+  /* 创建静态任务、命令队列和串口互斥锁。 */
   if(app_freertos_init() == 0U)
   {
     app_freertos_assert_failed(__FILE__, __LINE__);
@@ -73,70 +77,84 @@ int main(void)
   app_freertos_start();
   return 0;
 #elif (APP_ACTIVE_MODE == APP_MODE_LEFT_MOTOR_ENCODER_TEST)
-  /* �������Բ�����FreeRTOS��ֻ���������������������״̬���� */
+  /* 独立测试不启动FreeRTOS，只运行左电机和左编码器测试状态机。 */
   left_motor_encoder_test_init();
   for(;;)
   {
     left_motor_encoder_test_loop();
   }
 #elif (APP_ACTIVE_MODE == APP_MODE_DUAL_MOTOR_ENCODER_TEST)
-  /* ˫������ղ��԰��̶�ʱ��������������������FreeRTOS�� */
+  /* 双电机对照测试按固定时序逐个驱动电机，不启动FreeRTOS。 */
   dual_motor_encoder_test_init();
   for(;;)
   {
     dual_motor_encoder_test_loop();
   }
 #elif (APP_ACTIVE_MODE == APP_MODE_LEFT_MOTOR_SCOPE_FORWARD_TEST)
-  /* ʾ��������ֻ���������ֿ�����ת��������FreeRTOS��PID�� */
+  /* 示波器测试只让左电机保持开环正转，不启动FreeRTOS和PID。 */
   left_motor_scope_forward_test_init();
   for(;;)
   {
     left_motor_scope_forward_test_loop();
   }
 #elif (APP_ACTIVE_MODE == APP_MODE_RIGHT_MOTOR_SCOPE_FORWARD_TEST)
-  /* �ҵ������ֻ���ֿ�����ת���������������ƺͲɼ�ģ�顣 */
+  /* 右电机测试只保持开环正转，不启动其他控制和采集模块。 */
   right_motor_scope_forward_test_init();
   for(;;)
   {
     right_motor_scope_forward_test_loop();
   }
 #elif (APP_ACTIVE_MODE == APP_MODE_BOARD_BRINGUP_TEST)
-  /* �°��ϵ��Լ츲�Ǻ�����Դ�ͳ������裬���ʼ�ձ���ֹͣ�� */
+  /* 新板上电自检覆盖核心资源和常用外设，电机始终保持停止。 */
   at32f456_replacement_test_init();
   for(;;)
   {
     at32f456_replacement_test_loop();
   }
 #elif (APP_ACTIVE_MODE == APP_MODE_RIGHT_MOTOR_ENCODER_ADC_TEST)
-  /* �ҵ�����ϲ���ֻ�����ҵ������������ֹͣ�� */
+  /* 右电机联合测试只驱动右电机，左电机保持停止。 */
   right_motor_encoder_adc_test_init();
   for(;;)
   {
     right_motor_encoder_adc_test_loop();
   }
 #elif (APP_ACTIVE_MODE == APP_MODE_CANFD_TEST)
-  /* CAN FD���Բ����������ֻ����FDCAN3��PB3/PB4���߽ӿڡ� */
+  /* CAN FD测试不启动电机，只测试FDCAN3和PB3/PB4总线接口。 */
   canfd_test_init();
   for(;;)
   {
     canfd_test_loop();
   }
+#elif (APP_ACTIVE_MODE == APP_MODE_MOTOR_SPEED_TUNING_TEST)
+  /* 速度环整定前必须架空两个主动轮，测试代码复用正式闭环模块。 */
+  motor_speed_tuning_test_init();
+  for(;;)
+  {
+    motor_speed_tuning_test_loop();
+  }
 #elif (APP_ACTIVE_MODE == APP_MODE_RFID_READER_TEST)
-  /* RFID����ֻʹ��USART5����������USART1��������Ϣ�� */
+  /* RFID测试只使用USART5读卡，并从USART1输出诊断信息。 */
   rfid_reader_test_init();
   for(;;)
   {
     rfid_reader_test_loop();
   }
 #elif (APP_ACTIVE_MODE == APP_MODE_BUMPER_TEST)
-  /* ��ײ������ֻ�ɼ���·ԭʼ��ƽ������ʼ�������FreeRTOS�� */
+  /* 防撞条测试只采集四路原始电平，不初始化电机和FreeRTOS。 */
   bumper_test_init();
   for(;;)
   {
     bumper_test_loop();
   }
+#elif (APP_ACTIVE_MODE == APP_MODE_CANFD_BUMPER_TEST)
+  /* 联调固件不初始化电机，只验证防撞本地锁存和CAN FD双向协议。 */
+  canfd_bumper_test_init();
+  for(;;)
+  {
+    canfd_bumper_test_loop();
+  }
 #else
-  /* TOF�������Բ����������ֻ����������Ҿ���ͺ������״̬�� */
+  /* TOF与红外测试不启动电机，只周期输出左右距离和红外接收状态。 */
   tof_ir_test_init();
   for(;;)
   {

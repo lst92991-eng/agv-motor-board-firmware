@@ -1,7 +1,7 @@
 /**
   *****************************************************************************
   * @file     app_freertos.c
-  * @brief    AGVµ×ÅÌFreeRTOSÈÎÎñ¡¢¶ÓÁĞºÍÒì³£¹³×Ó
+  * @brief    AGVåº•ç›˜FreeRTOSä»»åŠ¡ã€é˜Ÿåˆ—å’Œå¼‚å¸¸é’©å­
   *****************************************************************************
   */
 
@@ -14,6 +14,7 @@
 #include "task.h"
 
 #include "chassis_motion_controller.h"
+#include "canfd_protocol.h"
 #include "debug_uart_log.h"
 #include "motion_command.h"
 #include "motor_speed_control.h"
@@ -21,11 +22,20 @@
 
 #define APP_CONTROL_TASK_PRIORITY                5U
 #define APP_SERIAL_TASK_PRIORITY                 3U
+#define APP_CANFD_TASK_PRIORITY                  3U
 #define APP_CONTROL_TASK_STACK_WORDS          1024U
 #define APP_SERIAL_TASK_STACK_WORDS            512U
+#define APP_CANFD_TASK_STACK_WORDS             768U
 #define APP_COMMAND_QUEUE_LENGTH                  8U
 #define APP_CONTROL_PERIOD_MS                    10U
 #define APP_SERIAL_POLL_PERIOD_MS                 2U
+#define APP_CANFD_POLL_PERIOD_MS                  2U
+#define APP_PRIORITY_COMMAND_COUNT                4U
+
+#define APP_PRIORITY_ESTOP_INDEX                  0U
+#define APP_PRIORITY_COMM_TIMEOUT_INDEX           1U
+#define APP_PRIORITY_CAN_BUSOFF_INDEX              2U
+#define APP_PRIORITY_STOP_INDEX                   3U
 
 static StaticTask_t app_control_task_storage;
 static StackType_t app_control_task_stack[APP_CONTROL_TASK_STACK_WORDS];
@@ -35,30 +45,105 @@ static StaticTask_t app_serial_task_storage;
 static StackType_t app_serial_task_stack[APP_SERIAL_TASK_STACK_WORDS];
 static TaskHandle_t app_serial_task_handle;
 
+static StaticTask_t app_canfd_task_storage;
+static StackType_t app_canfd_task_stack[APP_CANFD_TASK_STACK_WORDS];
+static TaskHandle_t app_canfd_task_handle;
+
 static StaticQueue_t app_command_queue_storage;
 static uint8_t app_command_queue_buffer[
     APP_COMMAND_QUEUE_LENGTH * sizeof(motion_command_t)];
 static QueueHandle_t app_command_queue;
 
+static motion_command_t app_priority_commands[APP_PRIORITY_COMMAND_COUNT];
+static volatile uint8_t app_priority_pending_mask;
+
 static StaticTask_t app_idle_task_storage;
 static StackType_t app_idle_task_stack[configMINIMAL_STACK_SIZE];
 
-/* Í¨ĞÅÈÎÎñÖ»¸ºÔğÌá½»ÃüÁî£¬µ×ÅÌ×´Ì¬Ö»ÄÜÓÉ¿ØÖÆÈÎÎñĞŞ¸Ä¡£ */
+static int8_t app_get_priority_command_index(motion_command_type_t type)
+{
+  if(type == MOTION_CMD_ESTOP)
+  {
+    return (int8_t)APP_PRIORITY_ESTOP_INDEX;
+  }
+  if(type == MOTION_CMD_COMM_TIMEOUT)
+  {
+    return (int8_t)APP_PRIORITY_COMM_TIMEOUT_INDEX;
+  }
+  if(type == MOTION_CMD_CAN_BUSOFF)
+  {
+    return (int8_t)APP_PRIORITY_CAN_BUSOFF_INDEX;
+  }
+  if(type == MOTION_CMD_STOP)
+  {
+    return (int8_t)APP_PRIORITY_STOP_INDEX;
+  }
+  return -1;
+}
+
+/* é€šä¿¡ä»»åŠ¡åªè´Ÿè´£æäº¤å‘½ä»¤ï¼Œåº•ç›˜çŠ¶æ€åªèƒ½ç”±æ§åˆ¶ä»»åŠ¡ä¿®æ”¹ã€‚ */
 static motion_command_handle_result_t app_submit_motion_command(
     const motion_command_t *command,
     void *context)
 {
   QueueHandle_t command_queue = (QueueHandle_t)context;
+  int8_t priority_index;
 
   if((command == NULL) || (command_queue == NULL))
   {
     return MOTION_HANDLE_REJECTED;
+  }
+  priority_index = app_get_priority_command_index(command->type);
+  if(priority_index >= 0)
+  {
+    taskENTER_CRITICAL();
+    app_priority_commands[(uint8_t)priority_index] = *command;
+    app_priority_pending_mask |= (uint8_t)(1U << priority_index);
+    taskEXIT_CRITICAL();
+    return MOTION_HANDLE_RECEIVED;
   }
   if(xQueueSend(command_queue, command, 0U) != pdPASS)
   {
     return MOTION_HANDLE_BUSY;
   }
   return MOTION_HANDLE_RECEIVED;
+}
+
+static uint8_t app_take_priority_command(motion_command_t *command)
+{
+  uint8_t index;
+  uint8_t found = 0U;
+
+  taskENTER_CRITICAL();
+  for(index = 0U; index < APP_PRIORITY_COMMAND_COUNT; index++)
+  {
+    if((app_priority_pending_mask & (uint8_t)(1U << index)) != 0U)
+    {
+      *command = app_priority_commands[index];
+      app_priority_pending_mask &= (uint8_t)~(1U << index);
+      found = 1U;
+      break;
+    }
+  }
+  taskEXIT_CRITICAL();
+  return found;
+}
+
+static void app_send_motion_result(const motion_command_t *command,
+                                   motion_command_handle_result_t result)
+{
+  if(command->source == MOTION_SOURCE_SERIAL)
+  {
+    serial_motion_protocol_send_result(command, result);
+  }
+  else if(command->source == MOTION_SOURCE_CANFD)
+  {
+    canfd_protocol_send_motion_result(
+        command,
+        result,
+        chassis_motion_controller_get_fault_mask(),
+        chassis_motion_controller_get_state());
+  }
 }
 
 static void app_control_task(void *parameter)
@@ -73,13 +158,33 @@ static void app_control_task(void *parameter)
     vTaskDelayUntil(&last_wake_tick,
                     pdMS_TO_TICKS(APP_CONTROL_PERIOD_MS));
 
+    while(app_take_priority_command(&command) != 0U)
+    {
+      result = chassis_motion_controller_handle_command(&command);
+      app_send_motion_result(&command, result);
+    }
+
     while(xQueueReceive(app_command_queue, &command, 0U) == pdPASS)
     {
       result = chassis_motion_controller_handle_command(&command);
-      serial_motion_protocol_send_result(&command, result);
+      app_send_motion_result(&command, result);
     }
 
     chassis_motion_controller_step_10ms();
+  }
+}
+
+static void app_canfd_task(void *parameter)
+{
+  TickType_t last_wake_tick = xTaskGetTickCount();
+
+  (void)parameter;
+  for(;;)
+  {
+    canfd_protocol_poll(
+        (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS));
+    vTaskDelayUntil(&last_wake_tick,
+                    pdMS_TO_TICKS(APP_CANFD_POLL_PERIOD_MS));
   }
 }
 
@@ -110,8 +215,11 @@ uint8_t app_freertos_init(void)
     return 0U;
   }
   vQueueAddToRegistry(app_command_queue, "MotionCmdQ");
+  app_priority_pending_mask = 0U;
   serial_motion_protocol_init(app_submit_motion_command,
                               app_command_queue);
+  canfd_protocol_init(app_submit_motion_command,
+                      app_command_queue);
 
   app_control_task_handle = xTaskCreateStatic(
       app_control_task,
@@ -129,14 +237,24 @@ uint8_t app_freertos_init(void)
       APP_SERIAL_TASK_PRIORITY,
       app_serial_task_stack,
       &app_serial_task_storage);
+  app_canfd_task_handle = xTaskCreateStatic(
+      app_canfd_task,
+      "CANFD",
+      APP_CANFD_TASK_STACK_WORDS,
+      NULL,
+      APP_CANFD_TASK_PRIORITY,
+      app_canfd_task_stack,
+      &app_canfd_task_storage);
 
   if((app_control_task_handle == NULL) ||
-     (app_serial_task_handle == NULL))
+     (app_serial_task_handle == NULL) ||
+     (app_canfd_task_handle == NULL))
   {
     return 0U;
   }
 
-  debug_uart_log_printf("FREERTOS,READY,CTRL=5,SERIAL=3,CMDQ=8\r\n");
+  debug_uart_log_printf(
+      "FREERTOS,READY,CTRL=5,SERIAL=3,CANFD=3,CMDQ=8\r\n");
   return 1U;
 }
 
@@ -144,7 +262,7 @@ void app_freertos_start(void)
 {
   vTaskStartScheduler();
 
-  /* µ÷¶ÈÆ÷·µ»ØÖ»¿ÉÄÜÊÇÄÚºËÆô¶¯Ê§°Ü£¬Á¢¼´±£³Öµç»úÉ²³µ¡£ */
+  /* è°ƒåº¦å™¨è¿”å›åªå¯èƒ½æ˜¯å†…æ ¸å¯åŠ¨å¤±è´¥ï¼Œç«‹å³ä¿æŒç”µæœºåˆ¹è½¦ã€‚ */
   motor_speed_control_hold_brake();
   taskDISABLE_INTERRUPTS();
   for(;;)

@@ -1,7 +1,7 @@
 /**
   *****************************************************************************
   * @file     serial_motion_protocol.c
-  * @brief    调试串口运动命令解析与ACK应答
+  * @brief    璋冭瘯涓插彛杩愬姩鍛戒护瑙ｆ瀽涓嶢CK搴旂瓟
   *****************************************************************************
   */
 
@@ -229,6 +229,16 @@ static void serial_motion_parse_line(char *line)
       return;
     }
     command.type = MOTION_CMD_RESET_ODOM;
+  }
+  else if(strcmp(fields[1], "CLEAR_FAULT") == 0)
+  {
+    if(field_count != 4U)
+    {
+      serial_motion_send_ack(command.sequence, "CLEAR_FAULT", "REJECTED",
+                             MOTION_COMMAND_ERROR_FORMAT);
+      return;
+    }
+    command.type = MOTION_CMD_CLEAR_FAULT;
   }
   else
   {

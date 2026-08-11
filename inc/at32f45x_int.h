@@ -48,6 +48,7 @@ void SVC_Handler(void);
 void DebugMon_Handler(void);
 void PendSV_Handler(void);
 void SysTick_Handler(void);
+void CAN3_RX_IRQHandler(void);
 
 #ifdef __cplusplus
 }

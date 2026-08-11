@@ -7,15 +7,19 @@
 extern "C" {
 #endif
 
-/* ³õÊ¼»¯Ë«µç»úËÙ¶È»·¡¢±àÂëÆ÷¡¢BMI270ºÍµ×ÅÌ×´Ì¬¡£ */
+/* åˆå§‹åŒ–åŒç”µæœºé€Ÿåº¦ç¯ã€ç¼–ç å™¨ã€BMI270å’Œåº•ç›˜çŠ¶æ€ã€‚ */
 void chassis_motion_controller_init(void);
 
-/* ÓÉµ×ÅÌ¿ØÖÆÈÎÎñ´¦ÀíÒ»ÌõÒÑ´Ó¶ÓÁĞÈ¡³öµÄÍ³Ò»ÔË¶¯ÃüÁî¡£ */
+/* ç”±åº•ç›˜æ§åˆ¶ä»»åŠ¡å¤„ç†ä¸€æ¡å·²ä»é˜Ÿåˆ—å–å‡ºçš„ç»Ÿä¸€è¿åŠ¨å‘½ä»¤ã€‚ */
 motion_command_handle_result_t chassis_motion_controller_handle_command(
     const motion_command_t *command);
 
-/* ÓÉ×î¸ßÓÅÏÈ¼¶¿ØÖÆÈÎÎñÃ¿10msµ÷ÓÃÒ»´Î¡£ */
+/* ç”±æœ€é«˜ä¼˜å…ˆçº§æ§åˆ¶ä»»åŠ¡æ¯10msè°ƒç”¨ä¸€æ¬¡ã€‚ */
 void chassis_motion_controller_step_10ms(void);
+
+/* CAN FDåº”ç­”å’ŒçŠ¶æ€ä¸ŠæŠ¥è¯»å–çš„åªè¯»çŠ¶æ€ã€‚ */
+uint8_t chassis_motion_controller_get_state(void);
+uint16_t chassis_motion_controller_get_fault_mask(void);
 
 #ifdef __cplusplus
 }

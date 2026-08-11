@@ -5,10 +5,8 @@
 extern "C" {
 #endif
 
-/* 初始化电机速度闭环测试，上电后先保持电机停止 3 秒。 */
+/* 兼容旧测试入口；实现已统一到正式速度环的整定测试模块。 */
 void motor_speed_pid_test_init(void);
-
-/* 周期执行速度 PID、更新 PWM，并输出目标速度、实测速度和 PWM。 */
 void motor_speed_pid_test_loop(void);
 
 #ifdef __cplusplus

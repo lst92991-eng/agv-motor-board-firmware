@@ -1,11 +1,12 @@
 /**
   *****************************************************************************
   * @file     bumper_input.c
-  * @brief    ËÄÂ··À×²ÌõÊı×ÖÊäÈëÇı¶¯
+  * @brief    å››è·¯é˜²æ’æ¡æ•°å­—è¾“å…¥é©±åŠ¨
   *
-  * ×ó¡¢ºó¡¢Ç°¡¢ÓÒ·À×²Ìõ·Ö±ğÁ¬½ÓPC13¡¢PC14¡¢PC15¡¢PB9¡£¿ª·¢°åÃ¿Â·
-  * ÒÑÅäÖÃ10kÍâ²¿ÉÏÀ­¡¢100Å·Ä·´®Áªµç×èºÍ100nFÂË²¨µçÈİ£¬Òò´ËMCUÄÚ²¿
-  * ÉÏÏÂÀ­¾ù¹Ø±Õ¡£Çı¶¯Ê¹ÓÃË«±ßÑØÖĞ¶Ï£¬²âÊÔ½×¶Î²»Ô¤ÉèÅö×²ÓĞĞ§µçÆ½¡£
+  * å·¦ã€åã€å‰ã€å³é˜²æ’æ¡åˆ†åˆ«è¿æ¥PC13ã€PC14ã€PC15ã€PB9ã€‚å¼€å‘æ¿æ¯è·¯
+  * å·²é…ç½®10kå¤–éƒ¨ä¸Šæ‹‰ã€100æ¬§å§†ä¸²è”ç”µé˜»å’Œ100nFæ»¤æ³¢ç”µå®¹ï¼Œå› æ­¤MCUå†…éƒ¨
+  * ä¸Šä¸‹æ‹‰å‡å…³é—­ã€‚é˜²æ’æ¡é—­åˆæ—¶æŠŠä¿¡å·æ¥åœ°ï¼Œå› æ­¤ä½ç”µå¹³ä¸ºç¢°æ’æœ‰æ•ˆçŠ¶æ€ã€‚
+  * é©±åŠ¨ä½¿ç”¨åŒè¾¹æ²¿ä¸­æ–­ï¼Œå¹¶åœ¨ä¸­æ–­å†…é¢å¤–é”å­˜æŒ‰ä¸‹æ²¿ï¼Œé¿å…çŸ­ä¿ƒç¢°æ’ä¸¢å¤±ã€‚
   *****************************************************************************
   */
 
@@ -28,6 +29,7 @@
 #define BUMPER_FRONT_PIN         GPIO_PINS_15
 
 static volatile uint8_t bumper_input_changed_mask;
+static volatile uint8_t bumper_input_pressed_latch_mask;
 
 static void bumper_input_exint_line_init(uint32_t line)
 {
@@ -50,7 +52,7 @@ void bumper_input_init(void)
   crm_periph_clock_enable(CRM_GPIOC_PERIPH_CLOCK, TRUE);
   crm_periph_clock_enable(CRM_SCFG_PERIPH_CLOCK, TRUE);
 
-  /* °åÉÏÒÑÓĞ10kÍâ²¿ÉÏÀ­£¬½ûÖ¹ÄÚ²¿ÉÏÏÂÀ­£¬±ÜÃâ¸Ä±äÊäÈë·ÖÑ¹ºÍÊ±¼ä³£Êı¡£ */
+  /* æ¿ä¸Šå·²æœ‰10kå¤–éƒ¨ä¸Šæ‹‰ï¼Œç¦æ­¢å†…éƒ¨ä¸Šä¸‹æ‹‰ï¼Œé¿å…æ”¹å˜è¾“å…¥åˆ†å‹å’Œæ—¶é—´å¸¸æ•°ã€‚ */
   gpio_default_para_init(&gpio_init_struct);
   gpio_init_struct.gpio_mode = GPIO_MODE_INPUT;
   gpio_init_struct.gpio_pull = GPIO_PULL_NONE;
@@ -72,8 +74,9 @@ void bumper_input_init(void)
   bumper_input_exint_line_init(EXINT_LINE_15);
 
   bumper_input_changed_mask = 0U;
+  bumper_input_pressed_latch_mask = 0U;
 
-  /* EXINT9_5Óë±àÂëÆ÷¹²ÏíÈë¿Ú£¬ÓÅÏÈ¼¶±£³ÖÓëÏÖÓĞ±àÂëÆ÷ÅäÖÃÒ»ÖÂ¡£ */
+  /* EXINT9_5ä¸ç¼–ç å™¨å…±äº«å…¥å£ï¼Œä¼˜å…ˆçº§ä¿æŒä¸ç°æœ‰ç¼–ç å™¨é…ç½®ä¸€è‡´ã€‚ */
   nvic_irq_enable(EXINT9_5_IRQn, 2U, 1U);
   nvic_irq_enable(EXINT15_10_IRQn, 2U, 2U);
 }
@@ -102,6 +105,12 @@ uint8_t bumper_input_read_raw_mask(void)
   return raw_mask;
 }
 
+uint8_t bumper_input_read_active_mask(void)
+{
+  return (uint8_t)(~bumper_input_read_raw_mask()) &
+         BUMPER_INPUT_ALL_MASK;
+}
+
 uint8_t bumper_input_take_changed_mask(void)
 {
   uint32_t interrupt_state = __get_PRIMASK();
@@ -118,7 +127,29 @@ uint8_t bumper_input_take_changed_mask(void)
   return changed_mask;
 }
 
+uint8_t bumper_input_take_pressed_latch_mask(void)
+{
+  uint32_t interrupt_state = __get_PRIMASK();
+  uint8_t pressed_mask;
+
+  __disable_irq();
+  pressed_mask = bumper_input_pressed_latch_mask;
+  bumper_input_pressed_latch_mask = 0U;
+  if(interrupt_state == 0U)
+  {
+    __enable_irq();
+  }
+
+  return pressed_mask;
+}
+
 void bumper_input_edge_irq_handler(uint8_t changed_mask)
 {
-  bumper_input_changed_mask |= changed_mask & BUMPER_INPUT_ALL_MASK;
+  uint8_t valid_changed_mask = changed_mask & BUMPER_INPUT_ALL_MASK;
+
+  bumper_input_changed_mask |= valid_changed_mask;
+
+  /* åªé”å­˜æœ¬æ¬¡å˜åŒ–åå·²å¤„äºä½ç”µå¹³çš„æ–¹å‘ï¼Œä¸åœ¨ä¸­æ–­ä¸­æ‰§è¡Œç”µæœºæˆ–RTOSæ“ä½œã€‚ */
+  bumper_input_pressed_latch_mask |=
+      bumper_input_read_active_mask() & valid_changed_mask;
 }

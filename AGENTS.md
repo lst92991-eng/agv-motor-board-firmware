@@ -33,7 +33,7 @@
 
 ## 2.2 传感器与接口
 - BMI270：SPI，PC10=SCK、PC11=MISO、PC12=MOSI、PA15=CS。
-- 左编码器：PC4/PC5；右编码器：PA6/PA7。
+- 左编码器：PA6/PA7；右编码器：PC4/PC5。
 - 电机PWM：TMR8控制PC6~PC9，PWM频率20kHz。
 - ADC：PA3/PA4/PA5；当前映射必须在正式保护启用前再次对照最终原理图。
 - 双VL53L0X：共用PB13=SCL、PB14=SDA。

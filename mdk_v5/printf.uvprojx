@@ -45,7 +45,7 @@
             <ExitCodeStop>0</ExitCodeStop>
             <ButtonStop>0</ButtonStop>
             <NotGenerated>0</NotGenerated>
-            <InvalidFlash>1</InvalidFlash>
+            <InvalidFlash>0</InvalidFlash>
           </TargetStatus>
           <OutputDirectory>.\objects\</OutputDirectory>
           <OutputName>printf</OutputName>
@@ -479,6 +479,11 @@
               <FilePath>..\src\motor_speed_control.c</FilePath>
             </File>
             <File>
+              <FileName>motor_speed_tuning_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motor_speed_tuning_test.c</FilePath>
+            </File>
+            <File>
               <FileName>chassis_motion_test.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\chassis_motion_test.c</FilePath>
@@ -554,6 +559,16 @@
               <FilePath>..\src\canfd_test.c</FilePath>
             </File>
             <File>
+              <FileName>canfd_protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\canfd_protocol.c</FilePath>
+            </File>
+            <File>
+              <FileName>canfd_bumper_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\canfd_bumper_test.c</FilePath>
+            </File>
+            <File>
               <FileName>motor_current.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\motor_current.c</FilePath>
@@ -587,6 +602,11 @@
               <FileName>bumper_input.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\bumper_input.c</FilePath>
+            </File>
+            <File>
+              <FileName>bumper_safety.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\bumper_safety.c</FilePath>
             </File>
             <File>
               <FileName>bumper_test.c</FileName>

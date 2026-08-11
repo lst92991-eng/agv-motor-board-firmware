@@ -3,9 +3,8 @@
   * @file     motor_speed_control.c
   * @brief    可复用的双路电机闭环速度控制
   *
-  * 控制参数来自实际开环标定：
-  * PWM 200/300/400/500/700/1000 对应约 17/27/37/47/67/97RPM，
-  * 因此前馈模型使用 PWM = 30 + 10 * RPM。
+ * 控制参数集中在 motor_speed_tuning.h，避免量产控制和独立 PID 测试
+ * 使用不一致的前馈、采样周期或 PID 参数。
   *****************************************************************************
   */
 
@@ -16,27 +15,7 @@
 #include "at32f45x_board.h"
 #include "motor_encoder.h"
 #include "motor_pid.h"
-
-#define MOTOR_SPEED_CONTROL_PERIOD_MS              20U
-#define MOTOR_ENCODER_COUNTS_PER_OUTPUT_REV       2640.0f
-#define MOTOR_LEFT_SPEED_FEEDBACK_SIGN              -1.0f
-#define MOTOR_RIGHT_SPEED_FEEDBACK_SIGN              1.0f
-
-#define MOTOR_SPEED_PID_KP                            1.5f
-#define MOTOR_SPEED_PID_KI                            2.0f
-#define MOTOR_SPEED_PID_KD                            0.0f
-#define MOTOR_SPEED_PID_CORRECTION_LIMIT            350.0f
-
-#define MOTOR_SPEED_FEED_FORWARD_PER_RPM             10.0f
-#define MOTOR_SPEED_FEED_FORWARD_STATIC_PWM         120.0f
-#define MOTOR_SPEED_FILTER_ALPHA                       0.10f
-#define MOTOR_SPEED_PWM_SLEW_PER_CYCLE                 8.0f
-#define MOTOR_SPEED_RAW_RPM_LIMIT                     120.0f
-#define MOTOR_SPEED_START_BOOST_PWM                   350.0f
-#define MOTOR_SPEED_START_BOOST_TOTAL_CYCLES             30U
-#define MOTOR_SPEED_START_BOOST_MIN_CYCLES               15U
-#define MOTOR_SPEED_START_BOOST_READY_CYCLES              5U
-#define MOTOR_SPEED_START_BOOST_EXIT_RPM                 5.0f
+#include "motor_speed_tuning.h"
 
 typedef struct
 {
@@ -72,7 +51,8 @@ static float motor_speed_limit(float value, float value_min, float value_max)
 static float motor_speed_count_delta_to_rpm(int32_t count_delta)
 {
   return ((float)count_delta * 60000.0f) /
-         (MOTOR_ENCODER_COUNTS_PER_OUTPUT_REV * (float)MOTOR_SPEED_CONTROL_PERIOD_MS);
+         (MOTOR_SPEED_ENCODER_COUNTS_PER_OUTPUT_REV *
+          (float)MOTOR_SPEED_CONTROL_PERIOD_MS);
 }
 
 static float motor_speed_filter_raw(float raw_rpm, float *last_valid_rpm)
@@ -85,6 +65,18 @@ static float motor_speed_filter_raw(float raw_rpm, float *last_valid_rpm)
 
   *last_valid_rpm = raw_rpm;
   return raw_rpm;
+}
+
+static float motor_speed_feed_forward(float target_rpm)
+{
+  if(target_rpm > 0.0f)
+  {
+    return MOTOR_SPEED_FEED_FORWARD_STATIC_PWM +
+           (target_rpm * MOTOR_SPEED_FEED_FORWARD_PER_RPM);
+  }
+
+  return -MOTOR_SPEED_FEED_FORWARD_STATIC_PWM +
+         (target_rpm * MOTOR_SPEED_FEED_FORWARD_PER_RPM);
 }
 
 static void motor_speed_axis_reset_control(motor_speed_axis_t *axis)
@@ -113,8 +105,8 @@ static int16_t motor_speed_axis_update_command(motor_speed_axis_t *axis)
 
   /*
    * 重载启动时先用较高PWM克服静摩擦和万向轮摆正阻力。
-   * 至少保持300ms，编码器同向达到5RPM并连续稳定100ms后退出，
-   * 最长不超过600ms，避免单次毛刺过早结束助推。
+   * 至少保持100ms，编码器同向达到5RPM并连续稳定40ms后退出，
+   * 最长不超过400ms，兼顾带载起步与架空测试的超调限制。
    */
   if(axis->startup_boost_cycles != 0U)
   {
@@ -144,24 +136,30 @@ static int16_t motor_speed_axis_update_command(motor_speed_axis_t *axis)
     }
     else
     {
+      float boost_pwm;
+
       axis->startup_boost_cycles--;
-      axis->pwm_command = (axis->target_rpm > 0.0f) ?
-                          MOTOR_SPEED_START_BOOST_PWM :
-                          -MOTOR_SPEED_START_BOOST_PWM;
+      boost_pwm = motor_speed_feed_forward(axis->target_rpm);
+      if(boost_pwm > 0.0f)
+      {
+        boost_pwm += MOTOR_SPEED_START_BOOST_EXTRA_PWM;
+        boost_pwm = motor_speed_limit(boost_pwm,
+                                      MOTOR_SPEED_START_BOOST_MIN_PWM,
+                                      MOTOR_SPEED_START_BOOST_MAX_PWM);
+      }
+      else
+      {
+        boost_pwm -= MOTOR_SPEED_START_BOOST_EXTRA_PWM;
+        boost_pwm = motor_speed_limit(boost_pwm,
+                                      -MOTOR_SPEED_START_BOOST_MAX_PWM,
+                                      -MOTOR_SPEED_START_BOOST_MIN_PWM);
+      }
+      axis->pwm_command = boost_pwm;
       return (int16_t)axis->pwm_command;
     }
   }
 
-  if(axis->target_rpm > 0.0f)
-  {
-    feed_forward = MOTOR_SPEED_FEED_FORWARD_STATIC_PWM +
-                   (axis->target_rpm * MOTOR_SPEED_FEED_FORWARD_PER_RPM);
-  }
-  else
-  {
-    feed_forward = -MOTOR_SPEED_FEED_FORWARD_STATIC_PWM +
-                   (axis->target_rpm * MOTOR_SPEED_FEED_FORWARD_PER_RPM);
-  }
+  feed_forward = motor_speed_feed_forward(axis->target_rpm);
 
   /* 启动斜坡达到前馈值之前冻结积分，防止启动阶段积分饱和。 */
   if(axis->pid_active == 0U)
@@ -210,7 +208,9 @@ static void motor_speed_axis_set_target(motor_speed_axis_t *axis, float target_r
 {
   uint8_t restart_control = 0U;
 
-  target_rpm = motor_speed_limit(target_rpm, -100.0f, 100.0f);
+  target_rpm = motor_speed_limit(target_rpm,
+                                 -MOTOR_SPEED_TARGET_LIMIT_RPM,
+                                 MOTOR_SPEED_TARGET_LIMIT_RPM);
 
   if((target_rpm == 0.0f) ||
      (axis->target_rpm == 0.0f) ||
@@ -242,12 +242,24 @@ void motor_speed_control_init(void)
 
   for(motor_index = 0; motor_index < 2U; motor_index++)
   {
-    motor_pid_init(&motor_speed_axes[motor_index].pid,
-                   MOTOR_SPEED_PID_KP,
-                   MOTOR_SPEED_PID_KI,
-                   MOTOR_SPEED_PID_KD,
-                   -MOTOR_SPEED_PID_CORRECTION_LIMIT,
-                   MOTOR_SPEED_PID_CORRECTION_LIMIT);
+    if(motor_index == MOTOR_LEFT)
+    {
+      motor_pid_init(&motor_speed_axes[motor_index].pid,
+                     MOTOR_SPEED_LEFT_PID_KP,
+                     MOTOR_SPEED_LEFT_PID_KI,
+                     MOTOR_SPEED_LEFT_PID_KD,
+                     -MOTOR_SPEED_PID_CORRECTION_LIMIT,
+                     MOTOR_SPEED_PID_CORRECTION_LIMIT);
+    }
+    else
+    {
+      motor_pid_init(&motor_speed_axes[motor_index].pid,
+                     MOTOR_SPEED_RIGHT_PID_KP,
+                     MOTOR_SPEED_RIGHT_PID_KI,
+                     MOTOR_SPEED_RIGHT_PID_KD,
+                     -MOTOR_SPEED_PID_CORRECTION_LIMIT,
+                     MOTOR_SPEED_PID_CORRECTION_LIMIT);
+    }
     motor_speed_axes[motor_index].target_rpm = 0.0f;
     motor_speed_axes[motor_index].measured_rpm = 0.0f;
     motor_speed_axes[motor_index].filtered_rpm = 0.0f;
@@ -284,8 +296,8 @@ void motor_speed_control_update_now(void)
     axis->last_count = current_count;
     /* 左右编码器安装方向不同，实车前进时必须分别修正反馈符号。 */
     feedback_sign = (motor_index == MOTOR_LEFT) ?
-                    MOTOR_LEFT_SPEED_FEEDBACK_SIGN :
-                    MOTOR_RIGHT_SPEED_FEEDBACK_SIGN;
+                    MOTOR_SPEED_LEFT_FEEDBACK_SIGN :
+                    MOTOR_SPEED_RIGHT_FEEDBACK_SIGN;
     raw_rpm = motor_speed_count_delta_to_rpm(count_delta) * feedback_sign;
     raw_rpm = motor_speed_filter_raw(raw_rpm, &axis->last_valid_raw_rpm);
     axis->filtered_rpm += MOTOR_SPEED_FILTER_ALPHA * (raw_rpm - axis->filtered_rpm);

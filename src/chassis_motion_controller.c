@@ -1,11 +1,11 @@
 /**
   *****************************************************************************
   * @file     chassis_motion_controller.c
-  * @brief    ´®¿ÚÇ°ÏòÈÎÎñºÍµ×ÅÌÖ±Ïß±Õ»·¿ØÖÆ
+  * @brief    ä¸²å£å‰å‘ä»»åŠ¡å’Œåº•ç›˜ç›´çº¿é—­ç¯æ§åˆ¶
   *
-  * µ±Ç°°æ±¾Ö»½ÓÊÜ±¾µØ×ø±êÏµXÖáÕı·½ÏòµÄ¶Ì¾àÀëÈÎÎñ¡£Ã¿´Î½ÓÊÜÈÎÎñÊ±¼ÇÂ¼
-  * BMI270µ±Ç°º½Ïò×÷ÎªÁã¶È·½Ïò£¬ÔÙÍ¨¹ıÍòÏòÂÖµÍËÙ¶ÔÆë¡¢º½Ïò»Ö¸´¡¢ËÙ¶È
-  * Ğ±ÆÂºÍ¼õËÙÍ£³µÍê³ÉÈÎÎñ¡£´®¿ÚĞ­ÒéºÍÃüÁî½á¹¹ºóĞø¿ÉÖ±½Ó¸´ÓÃÓÚCAN FD¡£
+  * å½“å‰ç‰ˆæœ¬åªæ¥å—æœ¬åœ°åæ ‡ç³»Xè½´æ­£æ–¹å‘çš„çŸ­è·ç¦»ä»»åŠ¡ã€‚æ¯æ¬¡æ¥å—ä»»åŠ¡æ—¶è®°å½•
+  * BMI270å½“å‰èˆªå‘ä½œä¸ºé›¶åº¦æ–¹å‘ï¼Œå†é€šè¿‡ä¸‡å‘è½®ä½é€Ÿå¯¹é½ã€èˆªå‘æ¢å¤ã€é€Ÿåº¦
+  * æ–œå¡å’Œå‡é€Ÿåœè½¦å®Œæˆä»»åŠ¡ã€‚ä¸²å£åè®®å’Œå‘½ä»¤ç»“æ„åç»­å¯ç›´æ¥å¤ç”¨äºCAN FDã€‚
   *****************************************************************************
   */
 
@@ -17,6 +17,8 @@
 
 #include "at32f45x_board.h"
 #include "bmi2_defs.h"
+#include "bumper_safety.h"
+#include "canfd_protocol.h"
 #include "debug_uart_transport.h"
 #include "debug_uart_log.h"
 #include "imu_heading.h"
@@ -68,6 +70,9 @@
 #define CHASSIS_FAULT_ESTOP                             0x0001U
 #define CHASSIS_FAULT_IMU                               0x0002U
 #define CHASSIS_FAULT_MOTION                            0x0004U
+#define CHASSIS_FAULT_BUMPER                            0x0008U
+#define CHASSIS_FAULT_COMM_TIMEOUT                      0x0010U
+#define CHASSIS_FAULT_CAN_BUSOFF                        0x0020U
 
 typedef enum
 {
@@ -80,6 +85,9 @@ typedef enum
   CHASSIS_STATE_COMPLETED,
   CHASSIS_STATE_HOLD,
   CHASSIS_STATE_ESTOP,
+  CHASSIS_STATE_BUMPER_ERROR,
+  CHASSIS_STATE_COMM_ERROR,
+  CHASSIS_STATE_CAN_ERROR,
   CHASSIS_STATE_IMU_ERROR,
   CHASSIS_STATE_MOTION_ERROR
 } chassis_state_t;
@@ -87,6 +95,8 @@ typedef enum
 static chassis_state_t chassis_state;
 static uint16_t chassis_fault;
 static uint16_t chassis_task_sequence;
+static motion_command_source_t chassis_task_source;
+static motion_command_type_t chassis_task_type;
 static uint8_t chassis_task_active;
 static uint16_t chassis_state_ticks;
 static uint16_t chassis_recover_stable_ticks;
@@ -96,6 +106,10 @@ static uint32_t chassis_task_ticks;
 static uint32_t chassis_task_timeout_ticks;
 static uint8_t chassis_speed_ticks;
 static uint8_t chassis_telemetry_ticks;
+static uint8_t chassis_can_fast_ticks;
+static uint8_t chassis_can_odom_ticks;
+static uint8_t chassis_can_motor_ticks;
+static uint8_t chassis_can_safety_ticks;
 static uint32_t chassis_uptime_ms;
 
 static int32_t chassis_task_left_start_count;
@@ -121,6 +135,8 @@ static float chassis_right_target_rpm;
 static float chassis_pose_x_mm;
 static float chassis_pose_y_mm;
 static uint32_t chassis_last_cycle_count;
+
+static void chassis_send_safety_can(uint8_t urgent);
 
 static int32_t chassis_abs_count(int32_t value)
 {
@@ -164,6 +180,19 @@ static int32_t chassis_round_to_int(float value)
                            (int32_t)(value - 0.5f);
 }
 
+static int16_t chassis_to_i16(int32_t value)
+{
+  if(value > 32767L)
+  {
+    return 32767;
+  }
+  if(value < -32768L)
+  {
+    return -32768;
+  }
+  return (int16_t)value;
+}
+
 static float chassis_get_sample_dt_s(void)
 {
   uint32_t current_cycle_count = DWT->CYCCNT;
@@ -197,6 +226,12 @@ static const char *chassis_get_state_name(void)
       return "HOLD";
     case CHASSIS_STATE_ESTOP:
       return "ESTOP";
+    case CHASSIS_STATE_BUMPER_ERROR:
+      return "BUMPER_ERROR";
+    case CHASSIS_STATE_COMM_ERROR:
+      return "COMM_ERROR";
+    case CHASSIS_STATE_CAN_ERROR:
+      return "CAN_ERROR";
     case CHASSIS_STATE_IMU_ERROR:
       return "IMU_ERROR";
     case CHASSIS_STATE_MOTION_ERROR:
@@ -280,19 +315,37 @@ static void chassis_update_pose(void)
   chassis_pose_y_mm += delta_distance_mm * sinf(relative_yaw_rad);
 }
 
-static void chassis_send_task_status(const char *status, uint16_t code)
+static void chassis_send_task_status(const char *serial_status,
+                                     canfd_ack_status_t canfd_status,
+                                     motion_command_error_t error,
+                                     uint16_t code)
 {
-  debug_uart_log_printf("ACK,%u,GOTO,%s,%u\r\n",
-                        (uint32_t)chassis_task_sequence,
-                        status,
-                        (uint32_t)code);
+  if(chassis_task_source == MOTION_SOURCE_SERIAL)
+  {
+    debug_uart_log_printf("ACK,%u,%s,%s,%u\r\n",
+                          (uint32_t)chassis_task_sequence,
+                          motion_command_get_name(chassis_task_type),
+                          serial_status,
+                          (uint32_t)code);
+  }
+  else if(chassis_task_source == MOTION_SOURCE_CANFD)
+  {
+    canfd_protocol_send_command_event(chassis_task_sequence,
+                                      chassis_task_type,
+                                      canfd_status,
+                                      error,
+                                      chassis_fault,
+                                      (uint8_t)chassis_state);
+  }
 }
 
 static void chassis_cancel_active_task(void)
 {
   if(chassis_task_active != 0U)
   {
-    chassis_send_task_status("CANCELED", CHASSIS_FAULT_NONE);
+    chassis_send_task_status("CANCELED", CANFD_ACK_CANCELED,
+                             MOTION_COMMAND_ERROR_NONE,
+                             CHASSIS_FAULT_NONE);
     chassis_task_active = 0U;
   }
 }
@@ -321,6 +374,9 @@ static void chassis_enter_state(chassis_state_t next_state)
   else if((next_state == CHASSIS_STATE_COMPLETED) ||
           (next_state == CHASSIS_STATE_HOLD) ||
           (next_state == CHASSIS_STATE_ESTOP) ||
+          (next_state == CHASSIS_STATE_BUMPER_ERROR) ||
+          (next_state == CHASSIS_STATE_COMM_ERROR) ||
+          (next_state == CHASSIS_STATE_CAN_ERROR) ||
           (next_state == CHASSIS_STATE_IMU_ERROR) ||
           (next_state == CHASSIS_STATE_MOTION_ERROR))
   {
@@ -336,14 +392,16 @@ static void chassis_complete_task(void)
   chassis_enter_state(CHASSIS_STATE_COMPLETED);
   if(chassis_task_active != 0U)
   {
-    chassis_send_task_status("COMPLETED", CHASSIS_FAULT_NONE);
+    chassis_send_task_status("COMPLETED", CANFD_ACK_COMPLETED,
+                             MOTION_COMMAND_ERROR_NONE,
+                             CHASSIS_FAULT_NONE);
     chassis_task_active = 0U;
   }
 }
 
 static void chassis_fail_task(uint16_t fault)
 {
-  chassis_fault = fault;
+  chassis_fault |= fault;
   if(fault == CHASSIS_FAULT_IMU)
   {
     chassis_enter_state(CHASSIS_STATE_IMU_ERROR);
@@ -355,12 +413,14 @@ static void chassis_fail_task(uint16_t fault)
 
   if(chassis_task_active != 0U)
   {
-    chassis_send_task_status("FAULT", fault);
+    chassis_send_task_status("FAULT", CANFD_ACK_FAULT,
+                             MOTION_COMMAND_ERROR_FAULT_LOCKED,
+                             fault);
     chassis_task_active = 0U;
   }
 }
 
-/* ÔÚÉ²³µÇ°±£Áô¹ÊÕÏË²¼äµÄÄ¿±ê¡¢·´À¡ºÍ±àÂëÆ÷Õï¶ÏĞÅÏ¢¡£ */
+/* åœ¨åˆ¹è½¦å‰ä¿ç•™æ•…éšœç¬é—´çš„ç›®æ ‡ã€åé¦ˆå’Œç¼–ç å™¨è¯Šæ–­ä¿¡æ¯ã€‚ */
 static void chassis_fail_motion(const char *reason)
 {
   debug_uart_log_printf(
@@ -396,7 +456,7 @@ static float chassis_get_heading_limit(void)
   return CHASSIS_HEADING_TRACK_LIMIT_RPM;
 }
 
-/* ËùÓĞ¾ÀÆ«½×¶Î¶¼ÈÃÁ½¸öÖ÷¶¯ÂÖÏòÇ°£¬Ö»Í¨¹ıÍ¬Ïò²îËÙĞÎ³ÉÆ½»¬»¡Ïß¡£ */
+/* æ‰€æœ‰çº åé˜¶æ®µéƒ½è®©ä¸¤ä¸ªä¸»åŠ¨è½®å‘å‰ï¼Œåªé€šè¿‡åŒå‘å·®é€Ÿå½¢æˆå¹³æ»‘å¼§çº¿ã€‚ */
 static void chassis_update_heading_targets(void)
 {
   float yaw_deg = imu_heading_get_yaw_deg();
@@ -440,7 +500,7 @@ static uint8_t chassis_encoder_mismatch(void)
            CHASSIS_CONTROL_ENCODER_MISMATCH_COUNTS)) ? 1U : 0U;
 }
 
-/* Ã»ÓĞÍòÏòÂÖ½Ç¶È´«¸ĞÆ÷£¬Ö»ÄÜÓÃ³µÂÖËÙ¶ÈºÍYawÎÈ¶¨¼ä½ÓÅĞ¶Ï°ÚÕı¡£ */
+/* æ²¡æœ‰ä¸‡å‘è½®è§’åº¦ä¼ æ„Ÿå™¨ï¼Œåªèƒ½ç”¨è½¦è½®é€Ÿåº¦å’ŒYawç¨³å®šé—´æ¥åˆ¤æ–­æ‘†æ­£ã€‚ */
 static uint8_t chassis_caster_motion_stable(void)
 {
   float left_rpm = motor_speed_control_get_measured_rpm(MOTOR_LEFT);
@@ -625,9 +685,7 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     {
       return MOTION_HANDLE_BUSY;
     }
-    if((chassis_state == CHASSIS_STATE_ESTOP) ||
-       (chassis_state == CHASSIS_STATE_IMU_ERROR) ||
-       (chassis_state == CHASSIS_STATE_MOTION_ERROR) ||
+    if((chassis_fault != CHASSIS_FAULT_NONE) ||
        (imu_heading_get_status() != BMI2_OK))
     {
       debug_uart_log_printf("TASK_REJECT,%u,FAULT_STATE,%u\r\n",
@@ -653,6 +711,8 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     }
 
     chassis_task_sequence = command->sequence;
+    chassis_task_source = command->source;
+    chassis_task_type = command->type;
     chassis_target_distance_mm = goto_data->x_mm;
     chassis_total_counts = chassis_round_to_int(
         ((float)chassis_target_distance_mm *
@@ -674,7 +734,6 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     chassis_heading_target_deg = imu_heading_get_yaw_deg();
     chassis_heading_error_deg = 0.0f;
     chassis_heading_correction_rpm = 0.0f;
-    chassis_fault = CHASSIS_FAULT_NONE;
     chassis_task_active = 1U;
     chassis_reset_local_pose();
     chassis_reset_task_progress();
@@ -690,9 +749,7 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
   if(command->type == MOTION_CMD_STOP)
   {
     chassis_cancel_active_task();
-    if((chassis_state != CHASSIS_STATE_ESTOP) &&
-       (chassis_state != CHASSIS_STATE_IMU_ERROR) &&
-       (chassis_state != CHASSIS_STATE_MOTION_ERROR))
+    if(chassis_fault == CHASSIS_FAULT_NONE)
     {
       chassis_enter_state(CHASSIS_STATE_HOLD);
     }
@@ -706,8 +763,27 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
   if(command->type == MOTION_CMD_ESTOP)
   {
     chassis_cancel_active_task();
-    chassis_fault = CHASSIS_FAULT_ESTOP;
+    chassis_fault |= CHASSIS_FAULT_ESTOP;
     chassis_enter_state(CHASSIS_STATE_ESTOP);
+    chassis_send_safety_can(1U);
+    return MOTION_HANDLE_ACCEPTED;
+  }
+
+  if(command->type == MOTION_CMD_COMM_TIMEOUT)
+  {
+    chassis_cancel_active_task();
+    chassis_fault |= CHASSIS_FAULT_COMM_TIMEOUT;
+    chassis_enter_state(CHASSIS_STATE_COMM_ERROR);
+    chassis_send_safety_can(1U);
+    return MOTION_HANDLE_ACCEPTED;
+  }
+
+  if(command->type == MOTION_CMD_CAN_BUSOFF)
+  {
+    chassis_cancel_active_task();
+    chassis_fault |= CHASSIS_FAULT_CAN_BUSOFF;
+    chassis_enter_state(CHASSIS_STATE_CAN_ERROR);
+    chassis_send_safety_can(1U);
     return MOTION_HANDLE_ACCEPTED;
   }
 
@@ -717,7 +793,8 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     {
       return MOTION_HANDLE_BUSY;
     }
-    if(imu_heading_get_status() != BMI2_OK)
+    if((chassis_fault != CHASSIS_FAULT_NONE) ||
+       (imu_heading_get_status() != BMI2_OK))
     {
       return MOTION_HANDLE_REJECTED;
     }
@@ -727,11 +804,41 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     motor_speed_control_resync_feedback();
     imu_heading_reset();
     chassis_heading_target_deg = 0.0f;
-    chassis_fault = CHASSIS_FAULT_NONE;
     chassis_reset_local_pose();
     chassis_reset_task_progress();
     chassis_enter_state(CHASSIS_STATE_IDLE);
     return MOTION_HANDLE_ACCEPTED;
+  }
+
+  if(command->type == MOTION_CMD_CLEAR_FAULT)
+  {
+    if(chassis_task_active != 0U)
+    {
+      return MOTION_HANDLE_BUSY;
+    }
+    if((imu_heading_get_status() != BMI2_OK) ||
+       (bumper_safety_can_clear() == 0U))
+    {
+      return MOTION_HANDLE_REJECTED;
+    }
+
+    motor_speed_control_hold_brake();
+    if(bumper_safety_clear_latch() == 0U)
+    {
+      return MOTION_HANDLE_REJECTED;
+    }
+    motor_speed_control_resync_feedback();
+    chassis_fault = CHASSIS_FAULT_NONE;
+    chassis_reset_task_progress();
+    chassis_enter_state(CHASSIS_STATE_IDLE);
+    chassis_send_safety_can(1U);
+    return MOTION_HANDLE_ACCEPTED;
+  }
+
+  /* é€Ÿåº¦æµåè®®å·²ç»å®šä¹‰ï¼Œè¿åŠ¨å­¦å’Œåå‘é‡Œç¨‹è®¡å®è½¦éªŒè¯å‰ä¿æŒæ˜¾å¼æ‹’ç»ã€‚ */
+  if(command->type == MOTION_CMD_SET_VELOCITY)
+  {
+    return MOTION_HANDLE_REJECTED;
   }
 
   return MOTION_HANDLE_REJECTED;
@@ -769,6 +876,191 @@ static void chassis_send_telemetry(void)
       motor_encoder_get_invalid_transition_count(MOTOR_RIGHT));
 }
 
+static uint8_t chassis_get_safety_source_mask(void)
+{
+  uint8_t mask = 0U;
+
+  if((chassis_fault & CHASSIS_FAULT_BUMPER) != 0U)
+  {
+    mask |= 0x01U;
+  }
+  if((chassis_fault & CHASSIS_FAULT_ESTOP) != 0U)
+  {
+    mask |= 0x02U;
+  }
+  if((chassis_fault & CHASSIS_FAULT_COMM_TIMEOUT) != 0U)
+  {
+    mask |= 0x04U;
+  }
+  if((chassis_fault & CHASSIS_FAULT_CAN_BUSOFF) != 0U)
+  {
+    mask |= 0x08U;
+  }
+  if((chassis_fault & CHASSIS_FAULT_IMU) != 0U)
+  {
+    mask |= 0x10U;
+  }
+  if((chassis_fault & CHASSIS_FAULT_MOTION) != 0U)
+  {
+    mask |= 0x20U;
+  }
+  return mask;
+}
+
+static void chassis_send_safety_can(uint8_t urgent)
+{
+  bumper_safety_snapshot_t bumper;
+  canfd_safety_status_t status;
+
+  bumper_safety_get_snapshot(&bumper);
+  status.uptime_ms = chassis_uptime_ms;
+  status.fault_mask = chassis_fault;
+  status.active_sequence = (chassis_task_active != 0U) ?
+                           chassis_task_sequence : 0U;
+  status.link_age_ms = canfd_protocol_get_link_age_ms(chassis_uptime_ms);
+  status.raw_mask = bumper.raw_mask;
+  status.active_mask = bumper.active_mask;
+  status.latched_mask = bumper.latched_mask;
+  status.safety_source_mask = chassis_get_safety_source_mask();
+  status.state = (uint8_t)chassis_state;
+  canfd_protocol_send_safety_status(&status, urgent);
+}
+
+static void chassis_send_drive_can(void)
+{
+  bumper_safety_snapshot_t bumper;
+  canfd_drive_status_t status;
+
+  bumper_safety_get_snapshot(&bumper);
+  status.uptime_ms = chassis_uptime_ms;
+  status.active_sequence = (chassis_task_active != 0U) ?
+                           chassis_task_sequence : 0U;
+  status.fault_mask = chassis_fault;
+  status.left_target_rpm_x100 = chassis_to_i16(
+      chassis_round_to_int(chassis_left_target_rpm * 100.0f));
+  status.right_target_rpm_x100 = chassis_to_i16(
+      chassis_round_to_int(chassis_right_target_rpm * 100.0f));
+  status.left_measured_rpm_x100 = chassis_to_i16(chassis_round_to_int(
+      motor_speed_control_get_measured_rpm(MOTOR_LEFT) * 100.0f));
+  status.right_measured_rpm_x100 = chassis_to_i16(chassis_round_to_int(
+      motor_speed_control_get_measured_rpm(MOTOR_RIGHT) * 100.0f));
+  status.state = (uint8_t)chassis_state;
+  status.active_source = (chassis_task_active != 0U) ?
+                         (uint8_t)chassis_task_source : 0U;
+  status.bumper_latched_mask = bumper.latched_mask;
+  canfd_protocol_send_drive_status(&status);
+}
+
+static void chassis_send_odom_can(void)
+{
+  canfd_odom_status_t status;
+  float relative_yaw_deg = chassis_wrap_deg(imu_heading_get_yaw_deg() -
+                                            chassis_heading_target_deg);
+  float left_rpm = motor_speed_control_get_measured_rpm(MOTOR_LEFT);
+  float right_rpm = motor_speed_control_get_measured_rpm(MOTOR_RIGHT);
+  float linear_mm_s = ((left_rpm + right_rpm) * 0.5f *
+                       CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM) / 60.0f;
+
+  status.uptime_ms = chassis_uptime_ms;
+  status.x_mm = chassis_round_to_int(chassis_pose_x_mm);
+  status.y_mm = chassis_round_to_int(chassis_pose_y_mm);
+  status.yaw_cdeg = chassis_round_to_int(relative_yaw_deg * 100.0f);
+  status.linear_mm_s = chassis_to_i16(chassis_round_to_int(linear_mm_s));
+  status.yaw_rate_cdeg_s = chassis_to_i16(chassis_round_to_int(
+      imu_heading_get_rate_dps() * 100.0f));
+  status.state = (uint8_t)chassis_state;
+  status.quality = (imu_heading_get_status() == BMI2_OK) ? 1U : 0U;
+  canfd_protocol_send_odom_status(&status);
+}
+
+static void chassis_send_motor_can(void)
+{
+  canfd_motor_status_t status;
+  uint32_t left_invalid =
+      motor_encoder_get_invalid_transition_count(MOTOR_LEFT);
+  uint32_t right_invalid =
+      motor_encoder_get_invalid_transition_count(MOTOR_RIGHT);
+
+  status.uptime_ms = chassis_uptime_ms;
+  status.left_target_rpm_x100 = chassis_to_i16(
+      chassis_round_to_int(chassis_left_target_rpm * 100.0f));
+  status.right_target_rpm_x100 = chassis_to_i16(
+      chassis_round_to_int(chassis_right_target_rpm * 100.0f));
+  status.left_measured_rpm_x100 = chassis_to_i16(chassis_round_to_int(
+      motor_speed_control_get_measured_rpm(MOTOR_LEFT) * 100.0f));
+  status.right_measured_rpm_x100 = chassis_to_i16(chassis_round_to_int(
+      motor_speed_control_get_measured_rpm(MOTOR_RIGHT) * 100.0f));
+  status.left_pwm = motor_speed_control_get_pwm(MOTOR_LEFT);
+  status.right_pwm = motor_speed_control_get_pwm(MOTOR_RIGHT);
+  status.left_encoder_count = motor_encoder_get_count(MOTOR_LEFT);
+  status.right_encoder_count = motor_encoder_get_count(MOTOR_RIGHT);
+  status.left_invalid_count = (left_invalid > 255UL) ?
+                              255U : (uint8_t)left_invalid;
+  status.right_invalid_count = (right_invalid > 255UL) ?
+                               255U : (uint8_t)right_invalid;
+  status.state = (uint8_t)chassis_state;
+  canfd_protocol_send_motor_status(&status);
+}
+
+static void chassis_handle_bumper_safety(void)
+{
+  bumper_safety_snapshot_t bumper;
+  uint8_t changed = bumper_safety_step_10ms();
+
+  bumper_safety_get_snapshot(&bumper);
+  if(bumper.latched_mask != 0U)
+  {
+    if((chassis_fault & CHASSIS_FAULT_BUMPER) == 0U)
+    {
+      chassis_cancel_active_task();
+      chassis_fault |= CHASSIS_FAULT_BUMPER;
+      chassis_enter_state(CHASSIS_STATE_BUMPER_ERROR);
+      debug_uart_log_printf(
+          "BUMPER_FAULT,raw=0x%02X,active=0x%02X,latched=0x%02X\r\n",
+          bumper.raw_mask, bumper.active_mask, bumper.latched_mask);
+      changed = 1U;
+    }
+    else
+    {
+      motor_speed_control_hold_brake();
+    }
+  }
+  if(changed != 0U)
+  {
+    chassis_send_safety_can(1U);
+  }
+}
+
+static void chassis_update_can_status(void)
+{
+  chassis_can_fast_ticks++;
+  chassis_can_odom_ticks++;
+  chassis_can_motor_ticks++;
+  chassis_can_safety_ticks++;
+
+  if(chassis_can_fast_ticks >= 2U)
+  {
+    chassis_can_fast_ticks = 0U;
+    chassis_send_drive_can();
+  }
+  if(chassis_can_odom_ticks >= 5U)
+  {
+    chassis_can_odom_ticks = 0U;
+    chassis_send_odom_can();
+  }
+  if(chassis_can_motor_ticks >= 10U)
+  {
+    chassis_can_motor_ticks = 0U;
+    chassis_send_motor_can();
+  }
+  if(chassis_can_safety_ticks >=
+     ((chassis_fault != CHASSIS_FAULT_NONE) ? 10U : 50U))
+  {
+    chassis_can_safety_ticks = 0U;
+    chassis_send_safety_can(0U);
+  }
+}
+
 void chassis_motion_controller_init(void)
 {
   int8_t imu_result;
@@ -776,10 +1068,13 @@ void chassis_motion_controller_init(void)
   debug_uart_transport_init();
   motor_speed_control_init();
   motor_speed_control_hold_brake();
+  bumper_safety_init();
 
   chassis_state = CHASSIS_STATE_IDLE;
   chassis_fault = CHASSIS_FAULT_NONE;
   chassis_task_sequence = 0U;
+  chassis_task_source = MOTION_SOURCE_LOCAL_SAFETY;
+  chassis_task_type = MOTION_CMD_STOP;
   chassis_task_active = 0U;
   chassis_state_ticks = 0U;
   chassis_recover_stable_ticks = 0U;
@@ -789,6 +1084,10 @@ void chassis_motion_controller_init(void)
   chassis_task_timeout_ticks = CHASSIS_CONTROL_TASK_TIMEOUT_MIN_TICKS;
   chassis_speed_ticks = 0U;
   chassis_telemetry_ticks = 0U;
+  chassis_can_fast_ticks = 0U;
+  chassis_can_odom_ticks = 0U;
+  chassis_can_motor_ticks = 0U;
+  chassis_can_safety_ticks = 0U;
   chassis_uptime_ms = 0U;
   chassis_target_distance_mm = 0L;
   chassis_total_counts = 0L;
@@ -837,6 +1136,9 @@ void chassis_motion_controller_step_10ms(void)
   chassis_uptime_ms += CHASSIS_CONTROL_LOOP_PERIOD_MS;
   sample_dt_s = chassis_get_sample_dt_s();
 
+  /* é˜²æ’æ¡ä¼˜å…ˆäºå§¿æ€æ›´æ–°å’Œæ™®é€šè¿åŠ¨çŠ¶æ€æœºï¼Œè§¦å‘åæœ¬å‘¨æœŸç«‹å³ä¿æŒåˆ¹è½¦ã€‚ */
+  chassis_handle_bumper_safety();
+
   imu_result = imu_heading_update(sample_dt_s);
   if((imu_result != BMI2_OK) &&
      (chassis_state != CHASSIS_STATE_IMU_ERROR))
@@ -874,4 +1176,16 @@ void chassis_motion_controller_step_10ms(void)
     chassis_telemetry_ticks = 0U;
     chassis_send_telemetry();
   }
+
+  chassis_update_can_status();
+}
+
+uint8_t chassis_motion_controller_get_state(void)
+{
+  return (uint8_t)chassis_state;
+}
+
+uint16_t chassis_motion_controller_get_fault_mask(void)
+{
+  return chassis_fault;
 }

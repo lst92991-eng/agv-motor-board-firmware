@@ -3,7 +3,7 @@
   * @file     motor_encoder.c
   * @brief    双路增量式正交编码器计数
   *
-  * 左编码器 A/B 相连接 PC4/PC5，右编码器 A/B 相连接 PA6/PA7。
+ * 左编码器 A/B 相连接 PA6/PA7，右编码器 A/B 相连接 PC4/PC5。
   * 每个信号的上升沿和下降沿都会触发中断，因此一组完整 AB 周期得到 4 个计数。
   *****************************************************************************
   */
@@ -43,16 +43,16 @@ static const int8_t quadrature_step_table[16] =
 
 static uint8_t motor_encoder_read_left_state(void)
 {
-  uint8_t phase_a = (gpio_input_data_bit_read(GPIOC, GPIO_PINS_4) != RESET) ? 1U : 0U;
-  uint8_t phase_b = (gpio_input_data_bit_read(GPIOC, GPIO_PINS_5) != RESET) ? 1U : 0U;
+  uint8_t phase_a = (gpio_input_data_bit_read(GPIOA, GPIO_PINS_6) != RESET) ? 1U : 0U;
+  uint8_t phase_b = (gpio_input_data_bit_read(GPIOA, GPIO_PINS_7) != RESET) ? 1U : 0U;
 
   return (uint8_t)((phase_a << 1) | phase_b);
 }
 
 static uint8_t motor_encoder_read_right_state(void)
 {
-  uint8_t phase_a = (gpio_input_data_bit_read(GPIOA, GPIO_PINS_6) != RESET) ? 1U : 0U;
-  uint8_t phase_b = (gpio_input_data_bit_read(GPIOA, GPIO_PINS_7) != RESET) ? 1U : 0U;
+  uint8_t phase_a = (gpio_input_data_bit_read(GPIOC, GPIO_PINS_4) != RESET) ? 1U : 0U;
+  uint8_t phase_b = (gpio_input_data_bit_read(GPIOC, GPIO_PINS_5) != RESET) ? 1U : 0U;
 
   return (uint8_t)((phase_a << 1) | phase_b);
 }
@@ -88,7 +88,7 @@ void motor_encoder_init(void)
   gpio_init_struct.gpio_pins = GPIO_PINS_6 | GPIO_PINS_7;
   gpio_init(GPIOA, &gpio_init_struct);
 
-  /* 将 EXINT4/5 映射到 GPIOC，将 EXINT6/7 映射到 GPIOA。 */
+  /* 右编码器使用 PC4/PC5，左编码器使用 PA6/PA7。 */
   scfg_exint_line_config(SCFG_PORT_SOURCE_GPIOC, SCFG_PINS_SOURCE4);
   scfg_exint_line_config(SCFG_PORT_SOURCE_GPIOC, SCFG_PINS_SOURCE5);
   scfg_exint_line_config(SCFG_PORT_SOURCE_GPIOA, SCFG_PINS_SOURCE6);
