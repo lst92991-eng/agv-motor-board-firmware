@@ -45,6 +45,6 @@
  * 测试一次；若某侧 measured_rpm 为负，仅翻转对应宏，不改 PID 参数。
  */
 #define MOTOR_SPEED_LEFT_FEEDBACK_SIGN                 1.0f
-#define MOTOR_SPEED_RIGHT_FEEDBACK_SIGN                1.0f
+#define MOTOR_SPEED_RIGHT_FEEDBACK_SIGN               -1.0f
 
 #endif
