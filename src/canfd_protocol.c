@@ -3,7 +3,7 @@
   * @file     canfd_protocol.c
   * @brief    AGV电机板CAN FD驱动、协议解析和状态上报
   *
-  * CAN3使用PB3/PB4的MUX11，仲裁段500kbps、数据段1Mbps并开启BRS。
+  * CAN3使用PB3/PB4的MUX11，仲裁段500kbps、数据段4Mbps并开启BRS。
   * 接收中断只复制帧到静态队列；字段解析、会话去重和发送均在任务轮询中
   * 执行。PDO逐字段序列化，不叠加私有头或应用层CRC。
   ****************************************************************************
@@ -21,14 +21,15 @@
 #include "at32f45x_misc.h"
 
 #define CANFD_BITTIME_DIV                         2U
-/* 192 MHz CAN clock: both phases sample at 75%; both SJWs are 250 ns. */
+/* 192 MHz PCLK CAN clock: both phases sample at 75%; arbitration/data SJW
+ * are 250 ns and 62.5 ns respectively. */
 #define CANFD_AC_BTS1                           144U
 #define CANFD_AC_BTS2                            48U
 #define CANFD_AC_RSAW                            24U
-#define CANFD_FD_BTS1                            72U
-#define CANFD_FD_BTS2                            24U
-#define CANFD_FD_RSAW                            24U
-#define CANFD_FD_SSP                             73U
+#define CANFD_FD_BTS1                            18U
+#define CANFD_FD_BTS2                             6U
+#define CANFD_FD_RSAW                             6U
+#define CANFD_FD_SSP                             19U
 
 #define CANFD_RX_QUEUE_LENGTH                     8U
 #define CANFD_TX_QUEUE_LENGTH                     8U

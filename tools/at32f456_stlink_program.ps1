@@ -153,18 +153,22 @@ if ($badCalls.Count -ne 0) {
 Write-Output "FLASH_VERIFY_OK bytes=$firmwareLength"
 if ($RunAfterProgram) {
   # 使用 Cortex-M SYSRESETREQ，不依赖未连接的 NRST 线。
-  & $openocd -s $scripts `
-    -f interface/stlink.cfg `
-    -c 'transport select swd' `
-    -c 'set CPUTAPID 0x2ba01477' `
-    -f target/artery/at32f4x.cfg `
-    -c 'adapter speed 100' `
-    -c 'init' `
-    -c 'halt' `
-    -c 'reset run' `
-    -c 'shutdown' | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    throw "Flash verified, but reset run failed: $LASTEXITCODE"
+  $resetArguments = @(
+    '-s', $scripts,
+    '-f', 'interface/stlink.cfg',
+    '-c', 'transport select swd',
+    '-c', 'set CPUTAPID 0x2ba01477',
+    '-f', 'target/artery/at32f4x.cfg',
+    '-c', 'adapter speed 100',
+    '-c', 'init',
+    '-c', 'halt',
+    '-c', 'reset run',
+    '-c', 'shutdown'
+  )
+  & $openocd @resetArguments | Out-Null
+  $resetExitCode = $LASTEXITCODE
+  if ($resetExitCode -ne 0) {
+    throw "Flash verified, but reset run failed: $resetExitCode"
   }
   Write-Output 'RESET_RUN_OK'
 }

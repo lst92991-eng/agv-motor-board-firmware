@@ -155,7 +155,7 @@ void canfd_bumper_test_init(void)
   canfd_protocol_init(canfd_bumper_test_handle_command, NULL);
 
   printf("\r\nCANFD_BUMPER_TEST,NO_MOTOR\r\n");
-  printf("CANFD_PROTOCOL,version=0.1,node=1,nominal=500kbps,data=1Mbps,BRS=1\r\n");
+  printf("CANFD_PROTOCOL,version=0.1,node=1,nominal=500kbps,data=4Mbps,BRS=1\r\n");
   printf("BUMPER_ACTIVE_LEVEL,LOW,raw=0x%02X,active=0x%02X,latched=0x%02X\r\n",
          bumper.raw_mask, bumper.active_mask, bumper.latched_mask);
   canfd_bumper_test_send_safety(1U);

@@ -150,9 +150,9 @@ class GsUsbFd:
         # 60MHz CAN时钟：500kbps，24TQ，采样点75%，SJW 250ns。
         self._control(GS_USB_BREQ_BITTIMING,
                       struct.pack("<IIIII", 1, 16, 6, 3, 5))
-        # 1Mbps，20TQ，采样点75%，SJW 250ns。
+        # 4Mbps，15TQ，采样点73.3%，SJW 66.7ns。
         self._control(GS_USB_BREQ_DATA_BITTIMING,
-                      struct.pack("<IIIII", 1, 13, 5, 5, 3))
+                      struct.pack("<IIIII", 1, 9, 4, 4, 1))
         self._control(GS_USB_BREQ_MODE,
                       struct.pack("<II", GS_CAN_MODE_START, GS_CAN_MODE_FD))
 
