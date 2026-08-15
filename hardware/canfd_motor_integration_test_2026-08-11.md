@@ -1,5 +1,9 @@
 # CAN FD 电机联调记录（2026-08-11）
 
+> 这是历史单板测试记录，其中的 1 Mbit/s / 4 Mbit/s 参数和私有协议已被取代。当前整车基线为 500 kbit/s / 1 Mbit/s、BRS，见 [`canfd_vehicle_flash_test_2026-08-15.md`](canfd_vehicle_flash_test_2026-08-15.md)。
+>
+> 后续静态审查发现的命令仲裁、会话生命周期和上位机发送问题，统一记录在 [`canfd_code_design_review_2026-08-13.md`](canfd_code_design_review_2026-08-13.md)。本记录证明单次主链路测试通过，不代表整车安全准入。
+
 ## 1. 测试目的
 
 验证新电机驱动板固件、USB-CAN FD 适配器和 Qt 上位机之间的完整链路，重点确认：

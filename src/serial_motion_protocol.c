@@ -22,7 +22,7 @@
 static char serial_motion_line[SERIAL_MOTION_LINE_SIZE];
 static uint16_t serial_motion_line_length;
 static uint8_t serial_motion_discard_line;
-static uint16_t serial_motion_last_sequence;
+static uint32_t serial_motion_last_sequence;
 static motion_command_handler_t serial_motion_handler;
 static void *serial_motion_handler_context;
 
@@ -81,7 +81,7 @@ static uint8_t serial_motion_split_fields(char *line,
   return field_count;
 }
 
-static void serial_motion_send_ack(uint16_t sequence,
+static void serial_motion_send_ack(uint32_t sequence,
                                    const char *command_name,
                                    const char *status,
                                    motion_command_error_t error)
@@ -156,7 +156,7 @@ static void serial_motion_parse_line(char *line)
                            MOTION_COMMAND_ERROR_SEQUENCE);
     return;
   }
-  command.sequence = (uint16_t)parsed_value;
+  command.sequence = (uint32_t)parsed_value;
 
   if(strcmp(fields[1], "GOTO") == 0)
   {

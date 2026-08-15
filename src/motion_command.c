@@ -79,7 +79,9 @@ motion_command_error_t motion_command_validate(const motion_command_t *command)
           (command->type != MOTION_CMD_RESET_ODOM) &&
           (command->type != MOTION_CMD_CLEAR_FAULT) &&
           (command->type != MOTION_CMD_COMM_TIMEOUT) &&
-          (command->type != MOTION_CMD_CAN_BUSOFF))
+          (command->type != MOTION_CMD_CAN_BUSOFF) &&
+          (command->type != MOTION_CMD_ENABLE) &&
+          (command->type != MOTION_CMD_DISABLE))
   {
     return MOTION_COMMAND_ERROR_UNSUPPORTED;
   }
@@ -107,6 +109,10 @@ const char *motion_command_get_name(motion_command_type_t type)
       return "COMM_TIMEOUT";
     case MOTION_CMD_CAN_BUSOFF:
       return "CAN_BUSOFF";
+    case MOTION_CMD_ENABLE:
+      return "ENABLE";
+    case MOTION_CMD_DISABLE:
+      return "DISABLE";
     default:
       return "UNKNOWN";
   }

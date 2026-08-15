@@ -12,23 +12,27 @@ extern "C" {
 #define CANFD_PROTOCOL_VERSION                 1U
 #define CANFD_PROTOCOL_NODE_ID                 1U
 
-#define CANFD_ID_ESTOP_BROADCAST             0x080U
-#define CANFD_ID_CONTROL                     0x091U
-#define CANFD_ID_HEARTBEAT                   0x101U
-#define CANFD_ID_VELOCITY                    0x111U
-#define CANFD_ID_GOTO_LOCAL                  0x121U
-#define CANFD_ID_COMMAND_ACK                 0x181U
-#define CANFD_ID_DRIVE_STATUS                0x201U
-#define CANFD_ID_ODOM_STATUS                 0x211U
-#define CANFD_ID_MOTOR_STATUS                0x221U
-#define CANFD_ID_SAFETY_STATUS               0x231U
+#define CANFD_ID_CHASSIS_STATE               0x181U
+#define CANFD_ID_CHASSIS_COMMAND             0x201U
+#define CANFD_ID_COMMAND_RESULT              0x281U
+#define CANFD_ID_CONTROL_LEASE               0x301U
+#define CANFD_ID_ODOM_STATUS                 0x381U
+#define CANFD_ID_VELOCITY                    0x401U
+#define CANFD_ID_SAFETY_STATUS               0x481U
 
 typedef enum
 {
-  CANFD_CONTROL_STOP = 1,
-  CANFD_CONTROL_CLEAR_FAULT = 2,
-  CANFD_CONTROL_RESET_ODOM = 3
-} canfd_control_opcode_t;
+  CANFD_COMMAND_CLAIM_CONTROL = 0x01,
+  CANFD_COMMAND_RELEASE_CONTROL = 0x02,
+  CANFD_COMMAND_ENABLE_MOTION = 0x10,
+  CANFD_COMMAND_DISABLE_MOTION = 0x11,
+  CANFD_COMMAND_GOTO_REL = 0x20,
+  CANFD_COMMAND_FOLLOW_MAG_START = 0x21,
+  CANFD_COMMAND_STOP = 0x30,
+  CANFD_COMMAND_ESTOP = 0x31,
+  CANFD_COMMAND_FAULT_RESET = 0x32,
+  CANFD_COMMAND_RESET_ODOM = 0x40
+} canfd_command_code_t;
 
 typedef enum
 {
@@ -43,16 +47,17 @@ typedef enum
 
 typedef struct
 {
-  uint32_t uptime_ms;
-  uint16_t active_sequence;
-  uint16_t fault_mask;
-  int16_t left_target_rpm_x100;
-  int16_t right_target_rpm_x100;
-  int16_t left_measured_rpm_x100;
-  int16_t right_measured_rpm_x100;
-  uint8_t state;
-  uint8_t active_source;
-  uint8_t bumper_latched_mask;
+  uint32_t command_id;
+  uint32_t session_id;
+  uint32_t fault_mask;
+  uint32_t warning_mask;
+  int32_t x_mm;
+  int32_t y_mm;
+  int32_t yaw_cdeg;
+  uint8_t application_state;
+  uint8_t motion_state;
+  uint8_t motion_mode;
+  uint8_t flags;
 } canfd_drive_status_t;
 
 typedef struct
@@ -63,8 +68,7 @@ typedef struct
   int32_t yaw_cdeg;
   int16_t linear_mm_s;
   int16_t yaw_rate_cdeg_s;
-  uint8_t state;
-  uint8_t quality;
+  uint16_t valid_flags;
 } canfd_odom_status_t;
 
 typedef struct
@@ -86,14 +90,11 @@ typedef struct
 typedef struct
 {
   uint32_t uptime_ms;
-  uint16_t fault_mask;
-  uint16_t active_sequence;
-  uint16_t link_age_ms;
-  uint8_t raw_mask;
-  uint8_t active_mask;
-  uint8_t latched_mask;
-  uint8_t safety_source_mask;
-  uint8_t state;
+  uint32_t fault_mask;
+  uint32_t warning_mask;
+  uint8_t bumper_mask;
+  uint8_t estop_source_mask;
+  uint8_t safety_state;
 } canfd_safety_status_t;
 
 /* 初始化CAN3、接收中断、协议队列和统一运动命令回调。 */
@@ -114,7 +115,8 @@ void canfd_protocol_send_motion_result(
 
 /* 发送任务完成、取消或运行故障事件。 */
 void canfd_protocol_send_command_event(
-    uint16_t sequence,
+    uint32_t sequence,
+    uint32_t session_id,
     motion_command_type_t type,
     canfd_ack_status_t status,
     motion_command_error_t error,
@@ -129,6 +131,8 @@ void canfd_protocol_send_safety_status(
     uint8_t urgent);
 
 uint16_t canfd_protocol_get_link_age_ms(uint32_t now_ms);
+uint32_t canfd_protocol_get_session_id(void);
+uint8_t canfd_protocol_is_session_valid(void);
 uint8_t canfd_protocol_get_bus_state_flags(void);
 uint32_t canfd_protocol_get_rx_count(void);
 uint32_t canfd_protocol_get_tx_count(void);

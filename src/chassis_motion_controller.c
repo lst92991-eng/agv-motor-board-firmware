@@ -94,10 +94,12 @@ typedef enum
 
 static chassis_state_t chassis_state;
 static uint16_t chassis_fault;
-static uint16_t chassis_task_sequence;
+static uint32_t chassis_task_sequence;
+static uint32_t chassis_task_session;
 static motion_command_source_t chassis_task_source;
 static motion_command_type_t chassis_task_type;
 static uint8_t chassis_task_active;
+static uint8_t chassis_motion_enabled;
 static uint16_t chassis_state_ticks;
 static uint16_t chassis_recover_stable_ticks;
 static uint16_t chassis_caster_stable_ticks;
@@ -108,7 +110,6 @@ static uint8_t chassis_speed_ticks;
 static uint8_t chassis_telemetry_ticks;
 static uint8_t chassis_can_fast_ticks;
 static uint8_t chassis_can_odom_ticks;
-static uint8_t chassis_can_motor_ticks;
 static uint8_t chassis_can_safety_ticks;
 static uint32_t chassis_uptime_ms;
 
@@ -331,6 +332,7 @@ static void chassis_send_task_status(const char *serial_status,
   else if(chassis_task_source == MOTION_SOURCE_CANFD)
   {
     canfd_protocol_send_command_event(chassis_task_sequence,
+                                      chassis_task_session,
                                       chassis_task_type,
                                       canfd_status,
                                       error,
@@ -678,12 +680,39 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     return MOTION_HANDLE_REJECTED;
   }
 
+  if(command->type == MOTION_CMD_ENABLE)
+  {
+    if((chassis_task_active != 0U) ||
+       (chassis_fault != CHASSIS_FAULT_NONE) ||
+       (imu_heading_get_status() != BMI2_OK) ||
+       (bumper_safety_can_clear() == 0U))
+    {
+      return MOTION_HANDLE_REJECTED;
+    }
+    chassis_motion_enabled = 1U;
+    chassis_enter_state(CHASSIS_STATE_IDLE);
+    return MOTION_HANDLE_ACCEPTED;
+  }
+
+  if(command->type == MOTION_CMD_DISABLE)
+  {
+    chassis_cancel_active_task();
+    chassis_motion_enabled = 0U;
+    chassis_enter_state(CHASSIS_STATE_IDLE);
+    return MOTION_HANDLE_ACCEPTED;
+  }
+
   if(command->type == MOTION_CMD_GOTO_LOCAL)
   {
     goto_data = &command->data.goto_local;
     if(chassis_task_active != 0U)
     {
       return MOTION_HANDLE_BUSY;
+    }
+    if((command->source == MOTION_SOURCE_CANFD) &&
+       (chassis_motion_enabled == 0U))
+    {
+      return MOTION_HANDLE_REJECTED;
     }
     if((chassis_fault != CHASSIS_FAULT_NONE) ||
        (imu_heading_get_status() != BMI2_OK))
@@ -711,6 +740,7 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     }
 
     chassis_task_sequence = command->sequence;
+    chassis_task_session = command->session_id;
     chassis_task_source = command->source;
     chassis_task_type = command->type;
     chassis_target_distance_mm = goto_data->x_mm;
@@ -723,13 +753,22 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
         CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM,
         8.0f,
         CHASSIS_CONTROL_MAX_RUN_RPM);
-    chassis_task_timeout_ticks =
-        (((uint32_t)chassis_target_distance_mm * 100U) /
-         (uint32_t)goto_data->speed_mm_s) +
-        CHASSIS_CONTROL_TASK_TIMEOUT_MARGIN_TICKS;
-    if(chassis_task_timeout_ticks < CHASSIS_CONTROL_TASK_TIMEOUT_MIN_TICKS)
+    if(goto_data->timeout_ms != 0UL)
     {
-      chassis_task_timeout_ticks = CHASSIS_CONTROL_TASK_TIMEOUT_MIN_TICKS;
+      chassis_task_timeout_ticks =
+          (goto_data->timeout_ms + CHASSIS_CONTROL_LOOP_PERIOD_MS - 1U) /
+          CHASSIS_CONTROL_LOOP_PERIOD_MS;
+    }
+    else
+    {
+      chassis_task_timeout_ticks =
+          (((uint32_t)chassis_target_distance_mm * 100U) /
+           (uint32_t)goto_data->speed_mm_s) +
+          CHASSIS_CONTROL_TASK_TIMEOUT_MARGIN_TICKS;
+      if(chassis_task_timeout_ticks < CHASSIS_CONTROL_TASK_TIMEOUT_MIN_TICKS)
+      {
+        chassis_task_timeout_ticks = CHASSIS_CONTROL_TASK_TIMEOUT_MIN_TICKS;
+      }
     }
     chassis_heading_target_deg = imu_heading_get_yaw_deg();
     chassis_heading_error_deg = 0.0f;
@@ -763,6 +802,7 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
   if(command->type == MOTION_CMD_ESTOP)
   {
     chassis_cancel_active_task();
+    chassis_motion_enabled = 0U;
     chassis_fault |= CHASSIS_FAULT_ESTOP;
     chassis_enter_state(CHASSIS_STATE_ESTOP);
     chassis_send_safety_can(1U);
@@ -772,6 +812,7 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
   if(command->type == MOTION_CMD_COMM_TIMEOUT)
   {
     chassis_cancel_active_task();
+    chassis_motion_enabled = 0U;
     chassis_fault |= CHASSIS_FAULT_COMM_TIMEOUT;
     chassis_enter_state(CHASSIS_STATE_COMM_ERROR);
     chassis_send_safety_can(1U);
@@ -781,6 +822,7 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
   if(command->type == MOTION_CMD_CAN_BUSOFF)
   {
     chassis_cancel_active_task();
+    chassis_motion_enabled = 0U;
     chassis_fault |= CHASSIS_FAULT_CAN_BUSOFF;
     chassis_enter_state(CHASSIS_STATE_CAN_ERROR);
     chassis_send_safety_can(1U);
@@ -829,6 +871,7 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     }
     motor_speed_control_resync_feedback();
     chassis_fault = CHASSIS_FAULT_NONE;
+    chassis_motion_enabled = 0U;
     chassis_reset_task_progress();
     chassis_enter_state(CHASSIS_STATE_IDLE);
     chassis_send_safety_can(1U);
@@ -888,23 +931,48 @@ static uint8_t chassis_get_safety_source_mask(void)
   {
     mask |= 0x02U;
   }
-  if((chassis_fault & CHASSIS_FAULT_COMM_TIMEOUT) != 0U)
+  if((chassis_fault & (CHASSIS_FAULT_COMM_TIMEOUT |
+                       CHASSIS_FAULT_CAN_BUSOFF |
+                       CHASSIS_FAULT_IMU |
+                       CHASSIS_FAULT_MOTION)) != 0U)
   {
     mask |= 0x04U;
   }
-  if((chassis_fault & CHASSIS_FAULT_CAN_BUSOFF) != 0U)
-  {
-    mask |= 0x08U;
-  }
-  if((chassis_fault & CHASSIS_FAULT_IMU) != 0U)
-  {
-    mask |= 0x10U;
-  }
-  if((chassis_fault & CHASSIS_FAULT_MOTION) != 0U)
-  {
-    mask |= 0x20U;
-  }
   return mask;
+}
+
+static uint8_t chassis_get_application_state(void)
+{
+  if((chassis_fault & (CHASSIS_FAULT_ESTOP | CHASSIS_FAULT_BUMPER)) != 0U)
+  {
+    return 6U;
+  }
+  if(chassis_fault != CHASSIS_FAULT_NONE)
+  {
+    return 5U;
+  }
+  if(chassis_is_driving() != 0U)
+  {
+    return 3U;
+  }
+  return (chassis_motion_enabled != 0U) ? 2U : 1U;
+}
+
+static uint8_t chassis_get_motion_state(void)
+{
+  if((chassis_fault & (CHASSIS_FAULT_ESTOP | CHASSIS_FAULT_BUMPER)) != 0U)
+  {
+    return 6U;
+  }
+  if(chassis_fault != CHASSIS_FAULT_NONE)
+  {
+    return 7U;
+  }
+  if(chassis_is_driving() != 0U)
+  {
+    return 2U;
+  }
+  return (chassis_motion_enabled != 0U) ? 1U : 0U;
 }
 
 static void chassis_send_safety_can(uint8_t urgent)
@@ -914,40 +982,55 @@ static void chassis_send_safety_can(uint8_t urgent)
 
   bumper_safety_get_snapshot(&bumper);
   status.uptime_ms = chassis_uptime_ms;
-  status.fault_mask = chassis_fault;
-  status.active_sequence = (chassis_task_active != 0U) ?
-                           chassis_task_sequence : 0U;
-  status.link_age_ms = canfd_protocol_get_link_age_ms(chassis_uptime_ms);
-  status.raw_mask = bumper.raw_mask;
-  status.active_mask = bumper.active_mask;
-  status.latched_mask = bumper.latched_mask;
-  status.safety_source_mask = chassis_get_safety_source_mask();
-  status.state = (uint8_t)chassis_state;
+  status.fault_mask = (uint32_t)chassis_fault;
+  status.warning_mask = 0UL;
+  status.bumper_mask = (uint8_t)(bumper.active_mask | bumper.latched_mask);
+  status.estop_source_mask = chassis_get_safety_source_mask();
+  if((chassis_fault & (CHASSIS_FAULT_ESTOP | CHASSIS_FAULT_BUMPER)) != 0U)
+  {
+    status.safety_state = 2U;
+  }
+  else if(chassis_fault != CHASSIS_FAULT_NONE)
+  {
+    status.safety_state = 3U;
+  }
+  else
+  {
+    status.safety_state = 0U;
+  }
   canfd_protocol_send_safety_status(&status, urgent);
 }
 
 static void chassis_send_drive_can(void)
 {
-  bumper_safety_snapshot_t bumper;
   canfd_drive_status_t status;
+  float relative_yaw_deg = chassis_wrap_deg(imu_heading_get_yaw_deg() -
+                                             chassis_heading_target_deg);
 
-  bumper_safety_get_snapshot(&bumper);
-  status.uptime_ms = chassis_uptime_ms;
-  status.active_sequence = (chassis_task_active != 0U) ?
-                           chassis_task_sequence : 0U;
-  status.fault_mask = chassis_fault;
-  status.left_target_rpm_x100 = chassis_to_i16(
-      chassis_round_to_int(chassis_left_target_rpm * 100.0f));
-  status.right_target_rpm_x100 = chassis_to_i16(
-      chassis_round_to_int(chassis_right_target_rpm * 100.0f));
-  status.left_measured_rpm_x100 = chassis_to_i16(chassis_round_to_int(
-      motor_speed_control_get_measured_rpm(MOTOR_LEFT) * 100.0f));
-  status.right_measured_rpm_x100 = chassis_to_i16(chassis_round_to_int(
-      motor_speed_control_get_measured_rpm(MOTOR_RIGHT) * 100.0f));
-  status.state = (uint8_t)chassis_state;
-  status.active_source = (chassis_task_active != 0U) ?
-                         (uint8_t)chassis_task_source : 0U;
-  status.bumper_latched_mask = bumper.latched_mask;
+  status.application_state = chassis_get_application_state();
+  status.motion_state = chassis_get_motion_state();
+  status.motion_mode = (chassis_task_active != 0U) ? 1U : 0U;
+  status.flags = 0x04U;
+  if(canfd_protocol_is_session_valid() != 0U)
+  {
+    status.flags |= 0x01U;
+  }
+  if(chassis_motion_enabled != 0U)
+  {
+    status.flags |= 0x02U;
+  }
+  if(imu_heading_get_status() == BMI2_OK)
+  {
+    status.flags |= 0x08U;
+  }
+  status.command_id = (chassis_task_active != 0U) ?
+                      chassis_task_sequence : 0UL;
+  status.session_id = canfd_protocol_get_session_id();
+  status.fault_mask = (uint32_t)chassis_fault;
+  status.warning_mask = 0UL;
+  status.x_mm = chassis_round_to_int(chassis_pose_x_mm);
+  status.y_mm = chassis_round_to_int(chassis_pose_y_mm);
+  status.yaw_cdeg = chassis_round_to_int(relative_yaw_deg * 100.0f);
   canfd_protocol_send_drive_status(&status);
 }
 
@@ -968,38 +1051,9 @@ static void chassis_send_odom_can(void)
   status.linear_mm_s = chassis_to_i16(chassis_round_to_int(linear_mm_s));
   status.yaw_rate_cdeg_s = chassis_to_i16(chassis_round_to_int(
       imu_heading_get_rate_dps() * 100.0f));
-  status.state = (uint8_t)chassis_state;
-  status.quality = (imu_heading_get_status() == BMI2_OK) ? 1U : 0U;
+  status.valid_flags = (imu_heading_get_status() == BMI2_OK) ? 0x0007U :
+                                                               0x0003U;
   canfd_protocol_send_odom_status(&status);
-}
-
-static void chassis_send_motor_can(void)
-{
-  canfd_motor_status_t status;
-  uint32_t left_invalid =
-      motor_encoder_get_invalid_transition_count(MOTOR_LEFT);
-  uint32_t right_invalid =
-      motor_encoder_get_invalid_transition_count(MOTOR_RIGHT);
-
-  status.uptime_ms = chassis_uptime_ms;
-  status.left_target_rpm_x100 = chassis_to_i16(
-      chassis_round_to_int(chassis_left_target_rpm * 100.0f));
-  status.right_target_rpm_x100 = chassis_to_i16(
-      chassis_round_to_int(chassis_right_target_rpm * 100.0f));
-  status.left_measured_rpm_x100 = chassis_to_i16(chassis_round_to_int(
-      motor_speed_control_get_measured_rpm(MOTOR_LEFT) * 100.0f));
-  status.right_measured_rpm_x100 = chassis_to_i16(chassis_round_to_int(
-      motor_speed_control_get_measured_rpm(MOTOR_RIGHT) * 100.0f));
-  status.left_pwm = motor_speed_control_get_pwm(MOTOR_LEFT);
-  status.right_pwm = motor_speed_control_get_pwm(MOTOR_RIGHT);
-  status.left_encoder_count = motor_encoder_get_count(MOTOR_LEFT);
-  status.right_encoder_count = motor_encoder_get_count(MOTOR_RIGHT);
-  status.left_invalid_count = (left_invalid > 255UL) ?
-                              255U : (uint8_t)left_invalid;
-  status.right_invalid_count = (right_invalid > 255UL) ?
-                               255U : (uint8_t)right_invalid;
-  status.state = (uint8_t)chassis_state;
-  canfd_protocol_send_motor_status(&status);
 }
 
 static void chassis_handle_bumper_safety(void)
@@ -1013,6 +1067,7 @@ static void chassis_handle_bumper_safety(void)
     if((chassis_fault & CHASSIS_FAULT_BUMPER) == 0U)
     {
       chassis_cancel_active_task();
+      chassis_motion_enabled = 0U;
       chassis_fault |= CHASSIS_FAULT_BUMPER;
       chassis_enter_state(CHASSIS_STATE_BUMPER_ERROR);
       debug_uart_log_printf(
@@ -1035,26 +1090,19 @@ static void chassis_update_can_status(void)
 {
   chassis_can_fast_ticks++;
   chassis_can_odom_ticks++;
-  chassis_can_motor_ticks++;
   chassis_can_safety_ticks++;
 
-  if(chassis_can_fast_ticks >= 2U)
+  if(chassis_can_fast_ticks >= 10U)
   {
     chassis_can_fast_ticks = 0U;
     chassis_send_drive_can();
   }
-  if(chassis_can_odom_ticks >= 5U)
+  if(chassis_can_odom_ticks >= 2U)
   {
     chassis_can_odom_ticks = 0U;
     chassis_send_odom_can();
   }
-  if(chassis_can_motor_ticks >= 10U)
-  {
-    chassis_can_motor_ticks = 0U;
-    chassis_send_motor_can();
-  }
-  if(chassis_can_safety_ticks >=
-     ((chassis_fault != CHASSIS_FAULT_NONE) ? 10U : 50U))
+  if(chassis_can_safety_ticks >= 10U)
   {
     chassis_can_safety_ticks = 0U;
     chassis_send_safety_can(0U);
@@ -1073,9 +1121,11 @@ void chassis_motion_controller_init(void)
   chassis_state = CHASSIS_STATE_IDLE;
   chassis_fault = CHASSIS_FAULT_NONE;
   chassis_task_sequence = 0U;
+  chassis_task_session = 0U;
   chassis_task_source = MOTION_SOURCE_LOCAL_SAFETY;
   chassis_task_type = MOTION_CMD_STOP;
   chassis_task_active = 0U;
+  chassis_motion_enabled = 0U;
   chassis_state_ticks = 0U;
   chassis_recover_stable_ticks = 0U;
   chassis_caster_stable_ticks = 0U;
@@ -1086,7 +1136,6 @@ void chassis_motion_controller_init(void)
   chassis_telemetry_ticks = 0U;
   chassis_can_fast_ticks = 0U;
   chassis_can_odom_ticks = 0U;
-  chassis_can_motor_ticks = 0U;
   chassis_can_safety_ticks = 0U;
   chassis_uptime_ms = 0U;
   chassis_target_distance_mm = 0L;

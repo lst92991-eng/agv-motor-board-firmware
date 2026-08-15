@@ -147,12 +147,12 @@ class GsUsbFd:
         self._control(GS_USB_BREQ_HOST_FORMAT, struct.pack("<I", 0x0000BEEF))
         self._control(GS_USB_BREQ_MODE, struct.pack("<II", GS_CAN_MODE_RESET, 0))
 
-        # 60MHz CAN时钟：1Mbps，20TQ，采样点80%。
+        # 60MHz CAN时钟：500kbps，24TQ，采样点75%，SJW 250ns。
         self._control(GS_USB_BREQ_BITTIMING,
-                      struct.pack("<IIIII", 1, 14, 4, 4, 3))
-        # 4Mbps，15TQ，采样点80%。
+                      struct.pack("<IIIII", 1, 16, 6, 3, 5))
+        # 1Mbps，20TQ，采样点75%，SJW 250ns。
         self._control(GS_USB_BREQ_DATA_BITTIMING,
-                      struct.pack("<IIIII", 1, 10, 3, 3, 1))
+                      struct.pack("<IIIII", 1, 13, 5, 5, 3))
         self._control(GS_USB_BREQ_MODE,
                       struct.pack("<II", GS_CAN_MODE_START, GS_CAN_MODE_FD))
 

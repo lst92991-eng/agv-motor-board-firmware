@@ -25,7 +25,9 @@ typedef enum
   MOTION_CMD_CLEAR_FAULT,
   MOTION_CMD_SET_VELOCITY,
   MOTION_CMD_COMM_TIMEOUT,
-  MOTION_CMD_CAN_BUSOFF
+  MOTION_CMD_CAN_BUSOFF,
+  MOTION_CMD_ENABLE,
+  MOTION_CMD_DISABLE
 } motion_command_type_t;
 
 typedef enum
@@ -59,6 +61,7 @@ typedef struct
   int32_t y_mm;
   int32_t yaw_cdeg;
   uint16_t speed_mm_s;
+  uint32_t timeout_ms;
 } motion_goto_local_data_t;
 
 typedef struct
@@ -73,7 +76,8 @@ typedef struct
 typedef struct
 {
   uint8_t version;
-  uint16_t sequence;
+  uint32_t sequence;
+  uint32_t session_id;
   motion_command_source_t source;
   motion_command_type_t type;
   union

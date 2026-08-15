@@ -7,7 +7,7 @@ param(
 )
 
 $openocd = 'D:\App\OpenOCD\bin\openocd.exe'
-$scripts = 'D:\App\OpenOCD\share\openocd\scripts'
+$scripts = 'D:\App\OpenOCD\openocd\scripts'
 $flm = Join-Path $env:TEMP 'AT32F456_256.flm.bin'
 $flmSource = 'D:\App\Keil\ARM\PACK\ArteryTek\AT32F45x_DFP\2.0.1\Flash\AT32F456_256.FLM'
 $fromelf = 'D:\App\Keil\ARM\ARMCC\bin\fromelf.exe'
@@ -49,6 +49,7 @@ $commands = [System.Collections.Generic.List[string]]::new()
 
 @(
   'adapter speed 100',
+  'reset_config srst_only srst_nogate connect_assert_srst',
   'init',
   'halt',
   'wait_halt 3000',
@@ -116,6 +117,9 @@ $commands.Add('shutdown')
 $arguments = @(
   '-s', $scripts,
   '-f', 'interface/stlink.cfg',
+  '-c', 'transport select swd',
+  # 该批次AT32F456实测SWD DPIDR为0x2BA01477。
+  '-c', 'set CPUTAPID 0x2ba01477',
   '-f', 'target/artery/at32f4x.cfg'
 )
 foreach ($command in $commands) {
@@ -148,11 +152,15 @@ if ($badCalls.Count -ne 0) {
 
 Write-Output "FLASH_VERIFY_OK bytes=$firmwareLength"
 if ($RunAfterProgram) {
+  # 使用 Cortex-M SYSRESETREQ，不依赖未连接的 NRST 线。
   & $openocd -s $scripts `
     -f interface/stlink.cfg `
+    -c 'transport select swd' `
+    -c 'set CPUTAPID 0x2ba01477' `
     -f target/artery/at32f4x.cfg `
     -c 'adapter speed 100' `
     -c 'init' `
+    -c 'halt' `
     -c 'reset run' `
     -c 'shutdown' | Out-Null
   if ($LASTEXITCODE -ne 0) {
