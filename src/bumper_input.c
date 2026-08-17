@@ -143,6 +143,20 @@ uint8_t bumper_input_take_pressed_latch_mask(void)
   return pressed_mask;
 }
 
+uint8_t bumper_input_has_pressed_latch(void)
+{
+  uint32_t interrupt_state = __get_PRIMASK();
+  uint8_t has_pressed_latch;
+
+  __disable_irq();
+  has_pressed_latch = (bumper_input_pressed_latch_mask != 0U) ? 1U : 0U;
+  if(interrupt_state == 0U)
+  {
+    __enable_irq();
+  }
+  return has_pressed_latch;
+}
+
 void bumper_input_edge_irq_handler(uint8_t changed_mask)
 {
   uint8_t valid_changed_mask = changed_mask & BUMPER_INPUT_ALL_MASK;

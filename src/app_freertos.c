@@ -37,6 +37,12 @@
 #define APP_PRIORITY_CAN_BUSOFF_INDEX              2U
 #define APP_PRIORITY_STOP_INDEX                   3U
 
+typedef struct
+{
+  motion_command_t command;
+  uint32_t safety_epoch;
+} app_queued_motion_command_t;
+
 static StaticTask_t app_control_task_storage;
 static StackType_t app_control_task_stack[APP_CONTROL_TASK_STACK_WORDS];
 static TaskHandle_t app_control_task_handle;
@@ -51,11 +57,12 @@ static TaskHandle_t app_canfd_task_handle;
 
 static StaticQueue_t app_command_queue_storage;
 static uint8_t app_command_queue_buffer[
-    APP_COMMAND_QUEUE_LENGTH * sizeof(motion_command_t)];
+    APP_COMMAND_QUEUE_LENGTH * sizeof(app_queued_motion_command_t)];
 static QueueHandle_t app_command_queue;
 
 static motion_command_t app_priority_commands[APP_PRIORITY_COMMAND_COUNT];
 static volatile uint8_t app_priority_pending_mask;
+static volatile uint32_t app_safety_epoch;
 
 static StaticTask_t app_idle_task_storage;
 static StackType_t app_idle_task_stack[configMINIMAL_STACK_SIZE];
@@ -87,6 +94,7 @@ static motion_command_handle_result_t app_submit_motion_command(
     void *context)
 {
   QueueHandle_t command_queue = (QueueHandle_t)context;
+  app_queued_motion_command_t queued_command;
   int8_t priority_index;
 
   if((command == NULL) || (command_queue == NULL))
@@ -96,13 +104,34 @@ static motion_command_handle_result_t app_submit_motion_command(
   priority_index = app_get_priority_command_index(command->type);
   if(priority_index >= 0)
   {
+    uint8_t priority_mask = (uint8_t)(1U << priority_index);
+
     taskENTER_CRITICAL();
+    if((app_priority_pending_mask & priority_mask) == 0U)
+    {
+      app_safety_epoch++;
+      if(app_safety_epoch == 0UL)
+      {
+        app_safety_epoch = 1UL;
+      }
+    }
     app_priority_commands[(uint8_t)priority_index] = *command;
-    app_priority_pending_mask |= (uint8_t)(1U << priority_index);
+    app_priority_pending_mask |= priority_mask;
     taskEXIT_CRITICAL();
     return MOTION_HANDLE_RECEIVED;
   }
-  if(xQueueSend(command_queue, command, 0U) != pdPASS)
+
+  queued_command.command = *command;
+  taskENTER_CRITICAL();
+  if(app_priority_pending_mask != 0U)
+  {
+    taskEXIT_CRITICAL();
+    return MOTION_HANDLE_BUSY;
+  }
+  queued_command.safety_epoch = app_safety_epoch;
+  taskEXIT_CRITICAL();
+
+  if(xQueueSend(command_queue, &queued_command, 0U) != pdPASS)
   {
     return MOTION_HANDLE_BUSY;
   }
@@ -129,6 +158,16 @@ static uint8_t app_take_priority_command(motion_command_t *command)
   return found;
 }
 
+static uint32_t app_get_safety_epoch(void)
+{
+  uint32_t safety_epoch;
+
+  taskENTER_CRITICAL();
+  safety_epoch = app_safety_epoch;
+  taskEXIT_CRITICAL();
+  return safety_epoch;
+}
+
 static void app_send_motion_result(const motion_command_t *command,
                                    motion_command_handle_result_t result)
 {
@@ -149,6 +188,7 @@ static void app_send_motion_result(const motion_command_t *command,
 static void app_control_task(void *parameter)
 {
   TickType_t last_wake_tick = xTaskGetTickCount();
+  app_queued_motion_command_t queued_command;
   motion_command_t command;
   motion_command_handle_result_t result;
 
@@ -164,10 +204,17 @@ static void app_control_task(void *parameter)
       app_send_motion_result(&command, result);
     }
 
-    while(xQueueReceive(app_command_queue, &command, 0U) == pdPASS)
+    while(xQueueReceive(app_command_queue, &queued_command, 0U) == pdPASS)
     {
-      result = chassis_motion_controller_handle_command(&command);
-      app_send_motion_result(&command, result);
+      if(queued_command.safety_epoch != app_get_safety_epoch())
+      {
+        app_send_motion_result(&queued_command.command,
+                               MOTION_HANDLE_REJECTED);
+        continue;
+      }
+      result = chassis_motion_controller_handle_command(
+          &queued_command.command);
+      app_send_motion_result(&queued_command.command, result);
     }
 
     chassis_motion_controller_step_10ms();
@@ -207,7 +254,7 @@ uint8_t app_freertos_init(void)
 
   app_command_queue = xQueueCreateStatic(
       APP_COMMAND_QUEUE_LENGTH,
-      sizeof(motion_command_t),
+      sizeof(app_queued_motion_command_t),
       app_command_queue_buffer,
       &app_command_queue_storage);
   if(app_command_queue == NULL)
@@ -216,6 +263,7 @@ uint8_t app_freertos_init(void)
   }
   vQueueAddToRegistry(app_command_queue, "MotionCmdQ");
   app_priority_pending_mask = 0U;
+  app_safety_epoch = 1UL;
   serial_motion_protocol_init(app_submit_motion_command,
                               app_command_queue);
   canfd_protocol_init(app_submit_motion_command,

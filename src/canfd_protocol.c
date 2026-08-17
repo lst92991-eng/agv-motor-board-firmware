@@ -32,7 +32,8 @@
 #define CANFD_FD_SSP                             19U
 
 #define CANFD_RX_QUEUE_LENGTH                     8U
-#define CANFD_TX_QUEUE_LENGTH                     8U
+#define CANFD_TX_URGENT_QUEUE_LENGTH             16U
+#define CANFD_TX_NORMAL_QUEUE_LENGTH              8U
 #define CANFD_LEASE_MIN_MS                      100U
 #define CANFD_LEASE_DEFAULT_MS                  200U
 #define CANFD_LEASE_MAX_MS                     1000U
@@ -77,12 +78,17 @@ typedef struct
 
 typedef struct
 {
-  canfd_frame_t frames[CANFD_TX_QUEUE_LENGTH];
+  canfd_frame_t *frames;
+  uint8_t capacity;
   volatile uint8_t head;
   volatile uint8_t tail;
 } canfd_tx_queue_t;
 
 static canfd_frame_t canfd_rx_queue[CANFD_RX_QUEUE_LENGTH];
+static canfd_frame_t
+  canfd_tx_urgent_frames[CANFD_TX_URGENT_QUEUE_LENGTH];
+static canfd_frame_t
+  canfd_tx_normal_frames[CANFD_TX_NORMAL_QUEUE_LENGTH];
 static volatile uint8_t canfd_rx_head;
 static volatile uint8_t canfd_rx_tail;
 static canfd_tx_queue_t canfd_tx_urgent_queue;
@@ -198,9 +204,16 @@ static uint8_t canfd_tx_queue_push(canfd_tx_queue_t *queue,
   uint32_t interrupt_state;
   uint8_t next_head;
 
+  if((queue == NULL) || (frame == NULL) || (queue->frames == NULL) ||
+     (queue->capacity < 2U))
+  {
+    canfd_tx_drop_count++;
+    return 0U;
+  }
+
   interrupt_state = __get_PRIMASK();
   __disable_irq();
-  next_head = (uint8_t)((queue->head + 1U) % CANFD_TX_QUEUE_LENGTH);
+  next_head = (uint8_t)((queue->head + 1U) % queue->capacity);
   if(next_head == queue->tail)
   {
     if(interrupt_state == 0U)
@@ -852,6 +865,12 @@ static uint8_t canfd_tx_queue_peek(canfd_tx_queue_t *queue,
 {
   uint32_t interrupt_state = __get_PRIMASK();
 
+  if((queue == NULL) || (frame == NULL) || (queue->frames == NULL) ||
+     (queue->capacity < 2U))
+  {
+    return 0U;
+  }
+
   __disable_irq();
   if(queue->tail == queue->head)
   {
@@ -873,11 +892,17 @@ static void canfd_tx_queue_pop(canfd_tx_queue_t *queue)
 {
   uint32_t interrupt_state = __get_PRIMASK();
 
+  if((queue == NULL) || (queue->frames == NULL) ||
+     (queue->capacity < 2U))
+  {
+    return;
+  }
+
   __disable_irq();
   if(queue->tail != queue->head)
   {
     queue->tail = (uint8_t)((queue->tail + 1U) %
-                            CANFD_TX_QUEUE_LENGTH);
+                            queue->capacity);
   }
   if(interrupt_state == 0U)
   {
@@ -964,8 +989,14 @@ void canfd_protocol_init(motion_command_handler_t handler, void *context)
 {
   canfd_rx_head = 0U;
   canfd_rx_tail = 0U;
+  memset(canfd_tx_urgent_frames, 0, sizeof(canfd_tx_urgent_frames));
+  memset(canfd_tx_normal_frames, 0, sizeof(canfd_tx_normal_frames));
   memset(&canfd_tx_urgent_queue, 0, sizeof(canfd_tx_urgent_queue));
   memset(&canfd_tx_normal_queue, 0, sizeof(canfd_tx_normal_queue));
+  canfd_tx_urgent_queue.frames = canfd_tx_urgent_frames;
+  canfd_tx_urgent_queue.capacity = CANFD_TX_URGENT_QUEUE_LENGTH;
+  canfd_tx_normal_queue.frames = canfd_tx_normal_frames;
+  canfd_tx_normal_queue.capacity = CANFD_TX_NORMAL_QUEUE_LENGTH;
   canfd_motion_handler = handler;
   canfd_motion_handler_context = context;
   canfd_now_ms = 0UL;
@@ -1244,6 +1275,17 @@ uint8_t canfd_protocol_get_bus_state_flags(void)
     flags |= CANFD_BUS_STATE_RX_OVERFLOW;
   }
   return flags;
+}
+
+uint8_t canfd_protocol_is_bus_healthy(void)
+{
+  if((CAN3->ctrlstat_bit.busoff != 0U) ||
+     (can_flag_get(CAN3, CAN_EPASS_FLAG) != RESET) ||
+     (can_flag_get(CAN3, CAN_EWARN_FLAG) != RESET))
+  {
+    return 0U;
+  }
+  return 1U;
 }
 
 uint32_t canfd_protocol_get_rx_count(void)

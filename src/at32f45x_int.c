@@ -28,6 +28,7 @@
 #include "bumper_input.h"
 #include "canfd_protocol.h"
 #include "debug_uart_transport.h"
+#include "motor_driver.h"
 #include "motor_encoder.h"
 
 /** @addtogroup AT32F455_periph_examples
@@ -38,6 +39,17 @@
   * @{
   */
 
+static void motor_exception_safe_halt(void)
+{
+  __disable_irq();
+  motor_driver_stop_all(MOTOR_STOP_BRAKE);
+  __DSB();
+  __ISB();
+  while(1)
+  {
+  }
+}
+
 /**
   * @brief  this function handles nmi exception.
   * @param  none
@@ -45,6 +57,7 @@
   */
 void NMI_Handler(void)
 {
+  motor_exception_safe_halt();
 }
 
 /**
@@ -54,10 +67,7 @@ void NMI_Handler(void)
   */
 void HardFault_Handler(void)
 {
-  /* go to infinite loop when hard fault exception occurs */
-  while(1)
-  {
-  }
+  motor_exception_safe_halt();
 }
 
 /**
@@ -67,10 +77,7 @@ void HardFault_Handler(void)
   */
 void MemManage_Handler(void)
 {
-  /* go to infinite loop when memory manage exception occurs */
-  while(1)
-  {
-  }
+  motor_exception_safe_halt();
 }
 
 /**
@@ -80,10 +87,7 @@ void MemManage_Handler(void)
   */
 void BusFault_Handler(void)
 {
-  /* go to infinite loop when bus fault exception occurs */
-  while(1)
-  {
-  }
+  motor_exception_safe_halt();
 }
 
 /**
@@ -93,10 +97,7 @@ void BusFault_Handler(void)
   */
 void UsageFault_Handler(void)
 {
-  /* go to infinite loop when usage fault exception occurs */
-  while(1)
-  {
-  }
+  motor_exception_safe_halt();
 }
 
 #if !defined(USE_FREERTOS)

@@ -134,6 +134,7 @@ uint16_t canfd_protocol_get_link_age_ms(uint32_t now_ms);
 uint32_t canfd_protocol_get_session_id(void);
 uint8_t canfd_protocol_is_session_valid(void);
 uint8_t canfd_protocol_get_bus_state_flags(void);
+uint8_t canfd_protocol_is_bus_healthy(void);
 uint32_t canfd_protocol_get_rx_count(void);
 uint32_t canfd_protocol_get_tx_count(void);
 uint32_t canfd_protocol_get_rx_drop_count(void);

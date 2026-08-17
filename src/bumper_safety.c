@@ -80,7 +80,9 @@ uint8_t bumper_safety_step_10ms(void)
 
 uint8_t bumper_safety_can_clear(void)
 {
-  return ((bumper_safety_snapshot.active_mask == 0U) &&
+  return ((bumper_input_read_active_mask() == 0U) &&
+          (bumper_input_has_pressed_latch() == 0U) &&
+          (bumper_safety_snapshot.active_mask == 0U) &&
           (bumper_safety_snapshot.release_stable_ms >=
            BUMPER_SAFETY_RELEASE_STABLE_MS)) ? 1U : 0U;
 }

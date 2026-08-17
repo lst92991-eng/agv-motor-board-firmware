@@ -858,7 +858,9 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     {
       return MOTION_HANDLE_BUSY;
     }
-    if((imu_heading_get_status() != BMI2_OK) ||
+    if((((chassis_fault & CHASSIS_FAULT_CAN_BUSOFF) != 0U) &&
+        (canfd_protocol_is_bus_healthy() == 0U)) ||
+       (imu_heading_get_status() != BMI2_OK) ||
        (bumper_safety_can_clear() == 0U))
     {
       return MOTION_HANDLE_REJECTED;
@@ -1215,6 +1217,8 @@ void chassis_motion_controller_step_10ms(void)
     }
     else
     {
+      /* 停车状态同步编码器基准并清零旧滤波值，避免遥测保持停车前速度。 */
+      motor_speed_control_resync_feedback();
       motor_speed_control_hold_brake();
     }
   }

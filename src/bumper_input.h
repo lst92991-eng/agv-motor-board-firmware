@@ -29,6 +29,9 @@ uint8_t bumper_input_take_changed_mask(void);
 /* 原子读取并清除中断期间锁存的按下方向，短促碰撞也不会被释放沿覆盖。 */
 uint8_t bumper_input_take_pressed_latch_mask(void);
 
+/* 不清除锁存地检查是否存在尚未被安全状态机消费的按下沿。 */
+uint8_t bumper_input_has_pressed_latch(void);
+
 /* 由外部中断入口调用，只记录变化方向，不在中断中打印或延时。 */
 void bumper_input_edge_irq_handler(uint8_t changed_mask);
 
