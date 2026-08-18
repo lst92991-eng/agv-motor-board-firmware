@@ -13,6 +13,7 @@ extern "C" {
 #define CANFD_PROTOCOL_NODE_ID                 1U
 
 #define CANFD_ID_CHASSIS_STATE               0x181U
+#define CANFD_ID_MAGNETIC_TPDO1               0x182U
 #define CANFD_ID_CHASSIS_COMMAND             0x201U
 #define CANFD_ID_COMMAND_RESULT              0x281U
 #define CANFD_ID_CONTROL_LEASE               0x301U
@@ -98,6 +99,23 @@ typedef struct
   uint8_t safety_state;
 } canfd_safety_status_t;
 
+typedef struct
+{
+  uint32_t sample_time_ms;
+  uint32_t receive_time_ms;
+  uint16_t sequence;
+  uint16_t active_mask;
+  int16_t offset_x10mm;
+  uint16_t strength;
+  uint16_t width_x10mm;
+  uint16_t signal[8];
+  uint16_t age_ms;
+  uint8_t status;
+  uint8_t flags;
+  uint8_t protocol_valid;
+  uint8_t received;
+} canfd_magnetic_sample_t;
+
 /* 初始化CAN3、接收中断、协议队列和统一运动命令回调。 */
 void canfd_protocol_init(motion_command_handler_t handler, void *context);
 
@@ -140,6 +158,10 @@ uint32_t canfd_protocol_get_rx_count(void);
 uint32_t canfd_protocol_get_tx_count(void);
 uint32_t canfd_protocol_get_rx_drop_count(void);
 uint32_t canfd_protocol_get_tx_drop_count(void);
+
+/* 获取磁导航最新快照；返回0表示尚未收到合法长度的0x182帧。 */
+uint8_t canfd_protocol_get_magnetic_sample(
+    canfd_magnetic_sample_t *sample);
 
 #ifdef __cplusplus
 }

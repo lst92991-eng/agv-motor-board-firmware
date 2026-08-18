@@ -13,6 +13,11 @@
 #define MOTION_GOTO_YAW_LIMIT_CDEG           18000L
 #define MOTION_GOTO_SPEED_MIN_MM_S              10U
 #define MOTION_GOTO_SPEED_MAX_MM_S            1000U
+#define MOTION_FOLLOW_MAG_DISTANCE_MIN_MM       300L
+#define MOTION_FOLLOW_MAG_DISTANCE_MAX_MM      3000L
+#define MOTION_FOLLOW_MAG_OFFSET_LIMIT_X10MM    100L
+#define MOTION_FOLLOW_MAG_SPEED_MIN_MM_S          50U
+#define MOTION_FOLLOW_MAG_SPEED_MAX_MM_S         330U
 #define MOTION_VELOCITY_LINEAR_LIMIT_MM_S       100L
 #define MOTION_VELOCITY_ANGULAR_LIMIT_MRAD_S    400L
 #define MOTION_VELOCITY_ACCEL_MIN_MM_S2          10U
@@ -50,6 +55,24 @@ motion_command_error_t motion_command_validate(const motion_command_t *command)
        (goto_data->yaw_cdeg > MOTION_GOTO_YAW_LIMIT_CDEG) ||
        (goto_data->speed_mm_s < MOTION_GOTO_SPEED_MIN_MM_S) ||
        (goto_data->speed_mm_s > MOTION_GOTO_SPEED_MAX_MM_S))
+    {
+      return MOTION_COMMAND_ERROR_RANGE;
+    }
+  }
+  else if(command->type == MOTION_CMD_FOLLOW_MAG)
+  {
+    const motion_follow_mag_data_t *follow = &command->data.follow_mag;
+
+    if((follow->distance_mm < MOTION_FOLLOW_MAG_DISTANCE_MIN_MM) ||
+       (follow->distance_mm > MOTION_FOLLOW_MAG_DISTANCE_MAX_MM) ||
+       (follow->target_offset_x10mm <
+        -MOTION_FOLLOW_MAG_OFFSET_LIMIT_X10MM) ||
+       (follow->target_offset_x10mm >
+        MOTION_FOLLOW_MAG_OFFSET_LIMIT_X10MM) ||
+       (follow->speed_mm_s < MOTION_FOLLOW_MAG_SPEED_MIN_MM_S) ||
+       (follow->speed_mm_s > MOTION_FOLLOW_MAG_SPEED_MAX_MM_S) ||
+       (follow->timeout_ms == 0UL) ||
+       (follow->timeout_ms > 120000UL))
     {
       return MOTION_COMMAND_ERROR_RANGE;
     }
@@ -95,6 +118,8 @@ const char *motion_command_get_name(motion_command_type_t type)
   {
     case MOTION_CMD_GOTO_LOCAL:
       return "GOTO";
+    case MOTION_CMD_FOLLOW_MAG:
+      return "FOLLOW_MAG";
     case MOTION_CMD_STOP:
       return "STOP";
     case MOTION_CMD_ESTOP:

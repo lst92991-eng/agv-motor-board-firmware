@@ -14,6 +14,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "at32f45x_board.h"
 #include "bmi2_defs.h"
@@ -38,6 +39,7 @@
 #define CHASSIS_CONTROL_ALIGN_COUNTS                    1000L
 #define CHASSIS_CONTROL_ALIGN_MAX_COUNTS                2000L
 #define CHASSIS_CONTROL_DECEL_DISTANCE_MM                150.0f
+#define CHASSIS_CONTROL_HIGH_SPEED_DECEL_DISTANCE_MM     650.0f
 #define CHASSIS_CONTROL_ENCODER_MISMATCH_COUNTS         1200L
 #define CHASSIS_CONTROL_ENCODER_CHECK_MIN_COUNTS        1500L
 
@@ -45,6 +47,7 @@
 #define CHASSIS_CONTROL_MAX_DISTANCE_MM                 3000L
 #define CHASSIS_CONTROL_MIN_SPEED_MM_S                    50U
 #define CHASSIS_CONTROL_MAX_SPEED_MM_S                   100U
+#define CHASSIS_CONTROL_MAX_MAG_SPEED_MM_S               330U
 #define CHASSIS_CONTROL_MIN_ROTATION_CDEG               1000L
 #define CHASSIS_CONTROL_MAX_ROTATION_CDEG               9000L
 #define CHASSIS_CONTROL_ROTATE_DECEL_COUNTS              400L
@@ -54,7 +57,8 @@
 #define CHASSIS_CONTROL_ROTATE_CONFIRM_TIMEOUT_TICKS     200U
 
 #define CHASSIS_CONTROL_ALIGN_RPM                         12.0f
-#define CHASSIS_CONTROL_MAX_RUN_RPM                       20.0f
+#define CHASSIS_CONTROL_LOW_SPEED_RUN_RPM                 25.0f
+#define CHASSIS_CONTROL_MAX_RUN_RPM                       75.0f
 #define CHASSIS_CONTROL_DECEL_END_RPM                     10.0f
 #define CHASSIS_CONTROL_RAMP_STEP_RPM                      0.2f
 
@@ -70,6 +74,31 @@
 #define CHASSIS_HEADING_ENCODER_RATE_LIMIT_DPS             120.0f
 #define CHASSIS_HEADING_DISAGREEMENT_LIMIT_DEG              15.0f
 #define CHASSIS_HEADING_DISAGREEMENT_TICKS                  50U
+
+#define CHASSIS_MAG_REQUIRED_FLAGS                           0x07U
+#define CHASSIS_MAG_MIN_STRENGTH                              180U
+#define CHASSIS_MAG_MAX_AGE_MS                                100U
+#define CHASSIS_MAG_MAX_OFFSET_X10MM                          350L
+#define CHASSIS_MAG_SECONDARY_MAX_PERCENT                      50U
+#define CHASSIS_MAG_INVALID_STOP_TICKS                         10U
+#define CHASSIS_MAG_OFFSET_DEADBAND_MM                           1.5f
+#define CHASSIS_MAG_YAW_RATE_KP_DPS_PER_MM                       2.0f
+#define CHASSIS_MAG_YAW_RATE_KD_DPS_PER_MM_S                     1.0f
+#define CHASSIS_MAG_OFFSET_RATE_FILTER_ALPHA                      0.50f
+#define CHASSIS_MAG_YAW_RATE_LIMIT_DPS                            8.0f
+#define CHASSIS_MAG_YAW_RATE_INNER_KP_RPM_PER_DPS                 0.35f
+#define CHASSIS_MAG_CAPTURE_CORRECTION_LIMIT_RPM                  6.0f
+#define CHASSIS_MAG_TRACK_CORRECTION_LIMIT_RPM                    8.0f
+#define CHASSIS_MAG_FULL_SPEED_OFFSET_MM                          3.0f
+#define CHASSIS_MAG_MIN_SPEED_OFFSET_MM                          15.0f
+#define CHASSIS_MAG_MIN_SPEED_RPM                                20.0f
+#define CHASSIS_MAG_SPEED_LIMIT_RISE_RPM                          0.10f
+#define CHASSIS_MAG_SPEED_LIMIT_FALL_RPM                          0.75f
+/*
+ * 2026-08-18落地循迹确认：当前装车方向下正偏差表示磁条在车体左侧，
+ * 应生成左转（正Yaw）目标；此前按CH8在右侧推断会使偏差持续增大。
+ */
+#define CHASSIS_MAG_TARGET_SIGN                                 1.0f
 
 #define CHASSIS_CONTROL_RECOVER_STABLE_TICKS               30U
 #define CHASSIS_CONTROL_RECOVER_TIMEOUT_TICKS              500U
@@ -87,6 +116,7 @@
 #define CHASSIS_FAULT_BUMPER                            0x0008U
 #define CHASSIS_FAULT_COMM_TIMEOUT                      0x0010U
 #define CHASSIS_FAULT_CAN_BUSOFF                        0x0020U
+#define CHASSIS_FAULT_MAGNETIC                          0x0040U
 
 /*
  * 实车落地验证：底层LEFT/RIGHT通道与车辆物理左右一致，但安装方向不同。
@@ -158,8 +188,18 @@ static int8_t chassis_translation_direction;
 static int8_t chassis_rotation_direction;
 static uint8_t chassis_rotation_task;
 static uint8_t chassis_rotation_confirmed;
+static uint8_t chassis_magnetic_follow_task;
+static uint8_t chassis_magnetic_sample_valid;
 static uint16_t chassis_rotation_confirm_ticks;
 static uint16_t chassis_heading_disagreement_ticks;
+static uint16_t chassis_magnetic_invalid_ticks;
+static int16_t chassis_magnetic_target_offset_x10mm;
+static int16_t chassis_magnetic_offset_x10mm;
+static uint16_t chassis_magnetic_strength;
+static uint16_t chassis_magnetic_age_ms;
+static uint16_t chassis_magnetic_last_sequence;
+static uint8_t chassis_magnetic_sequence_valid;
+static uint32_t chassis_magnetic_last_receive_time_ms;
 static int32_t chassis_heading_last_left_count;
 static int32_t chassis_heading_last_right_count;
 static chassis_heading_fusion_t chassis_heading_fusion;
@@ -167,6 +207,10 @@ static chassis_heading_fusion_t chassis_heading_fusion;
 static float chassis_heading_target_deg;
 static float chassis_heading_error_deg;
 static float chassis_heading_correction_rpm;
+static float chassis_magnetic_last_offset_error_mm;
+static float chassis_magnetic_offset_rate_mm_s;
+static float chassis_magnetic_yaw_rate_target_dps;
+static float chassis_magnetic_speed_limit_rpm;
 static float chassis_requested_run_rpm;
 static float chassis_base_rpm;
 static float chassis_left_target_rpm;
@@ -239,6 +283,219 @@ static uint8_t chassis_to_u8(uint32_t value)
   return (value > 255UL) ? 255U : (uint8_t)value;
 }
 
+/* 单个阈值低谷仍属于同一宽峰；连续两个低谷才分隔独立磁峰。 */
+static uint8_t chassis_magnetic_sample_trackable(
+    canfd_magnetic_sample_t *sample)
+{
+  uint32_t group_peak = 0UL;
+  uint32_t dominant_peak = 0UL;
+  uint32_t secondary_peak = 0UL;
+  uint32_t total_strength = 0UL;
+  uint8_t inactive_run = 0U;
+  uint8_t index;
+
+  if(sample == NULL)
+  {
+    return 0U;
+  }
+  memset(sample, 0, sizeof(*sample));
+  if((canfd_protocol_get_magnetic_sample(sample) == 0U) ||
+     (sample->protocol_valid == 0U) ||
+     (sample->age_ms > CHASSIS_MAG_MAX_AGE_MS) ||
+     ((sample->flags & CHASSIS_MAG_REQUIRED_FLAGS) !=
+      CHASSIS_MAG_REQUIRED_FLAGS) ||
+     (sample->status == 0U) ||
+     (sample->strength < CHASSIS_MAG_MIN_STRENGTH) ||
+     (chassis_abs_count((int32_t)sample->offset_x10mm) >
+      CHASSIS_MAG_MAX_OFFSET_X10MM))
+  {
+    return 0U;
+  }
+
+  for(index = 0U; index < 8U; index++)
+  {
+    if((sample->active_mask & (uint16_t)(1U << index)) != 0U)
+    {
+      if(inactive_run >= 2U)
+      {
+        if(group_peak > dominant_peak)
+        {
+          secondary_peak = dominant_peak;
+          dominant_peak = group_peak;
+        }
+        else if(group_peak > secondary_peak)
+        {
+          secondary_peak = group_peak;
+        }
+        group_peak = 0UL;
+      }
+      inactive_run = 0U;
+      if(sample->signal[index] > group_peak)
+      {
+        group_peak = sample->signal[index];
+      }
+      total_strength += sample->signal[index];
+    }
+    else if((group_peak != 0UL) && (inactive_run < 2U))
+    {
+      inactive_run++;
+    }
+  }
+  if(group_peak > dominant_peak)
+  {
+    secondary_peak = dominant_peak;
+    dominant_peak = group_peak;
+  }
+  else if(group_peak > secondary_peak)
+  {
+    secondary_peak = group_peak;
+  }
+  if((total_strength == 0UL) ||
+     ((sample->status == 3U) &&
+      ((secondary_peak * 100UL) >
+       (dominant_peak * CHASSIS_MAG_SECONDARY_MAX_PERCENT))))
+  {
+    return 0U;
+  }
+  return 1U;
+}
+
+static uint8_t chassis_update_magnetic_follow(float dt_s)
+{
+  canfd_magnetic_sample_t sample;
+  float offset_error_mm;
+  float controlled_error_mm;
+  float absolute_offset_mm;
+  float minimum_speed_rpm;
+  float raw_offset_rate_mm_s;
+  float speed_limit_target_rpm;
+  float speed_limit_step_rpm;
+  uint32_t sample_interval_ms;
+
+  if(chassis_magnetic_follow_task == 0U)
+  {
+    return 1U;
+  }
+  if(chassis_magnetic_sample_trackable(&sample) == 0U)
+  {
+    chassis_magnetic_sample_valid = 0U;
+    if(chassis_magnetic_invalid_ticks <
+       CHASSIS_MAG_INVALID_STOP_TICKS)
+    {
+      chassis_magnetic_invalid_ticks++;
+    }
+    if(chassis_magnetic_invalid_ticks >=
+       CHASSIS_MAG_INVALID_STOP_TICKS)
+    {
+      debug_uart_log_printf(
+          "MAG_FAULT,age=%u,status=%u,flags=0x%02X,strength=%u,offset=%d\r\n",
+          (uint32_t)sample.age_ms,
+          (uint32_t)sample.status,
+          (uint32_t)sample.flags,
+          (uint32_t)sample.strength,
+          (int)sample.offset_x10mm);
+      chassis_fail_task(CHASSIS_FAULT_MAGNETIC);
+    }
+    return 0U;
+  }
+
+  chassis_magnetic_invalid_ticks = 0U;
+  chassis_magnetic_sample_valid = 1U;
+  chassis_magnetic_offset_x10mm = sample.offset_x10mm;
+  chassis_magnetic_strength = sample.strength;
+  chassis_magnetic_age_ms = sample.age_ms;
+  offset_error_mm = ((float)sample.offset_x10mm -
+                     (float)chassis_magnetic_target_offset_x10mm) / 10.0f;
+  if((chassis_magnetic_sequence_valid != 0U) &&
+     (sample.sequence != chassis_magnetic_last_sequence))
+  {
+    sample_interval_ms = sample.receive_time_ms -
+                         chassis_magnetic_last_receive_time_ms;
+    if((sample_interval_ms >= 5UL) && (sample_interval_ms <= 200UL))
+    {
+      raw_offset_rate_mm_s =
+          (offset_error_mm - chassis_magnetic_last_offset_error_mm) *
+          1000.0f / (float)sample_interval_ms;
+      chassis_magnetic_offset_rate_mm_s +=
+          CHASSIS_MAG_OFFSET_RATE_FILTER_ALPHA *
+          (raw_offset_rate_mm_s - chassis_magnetic_offset_rate_mm_s);
+    }
+    else
+    {
+      chassis_magnetic_offset_rate_mm_s = 0.0f;
+    }
+    chassis_magnetic_last_offset_error_mm = offset_error_mm;
+    chassis_magnetic_last_sequence = sample.sequence;
+    chassis_magnetic_last_receive_time_ms = sample.receive_time_ms;
+  }
+  else if(chassis_magnetic_sequence_valid == 0U)
+  {
+    chassis_magnetic_last_offset_error_mm = offset_error_mm;
+    chassis_magnetic_last_sequence = sample.sequence;
+    chassis_magnetic_last_receive_time_ms = sample.receive_time_ms;
+    chassis_magnetic_offset_rate_mm_s = 0.0f;
+    chassis_magnetic_sequence_valid = 1U;
+  }
+  if(offset_error_mm > CHASSIS_MAG_OFFSET_DEADBAND_MM)
+  {
+    controlled_error_mm = offset_error_mm -
+                          CHASSIS_MAG_OFFSET_DEADBAND_MM;
+  }
+  else if(offset_error_mm < -CHASSIS_MAG_OFFSET_DEADBAND_MM)
+  {
+    controlled_error_mm = offset_error_mm +
+                          CHASSIS_MAG_OFFSET_DEADBAND_MM;
+  }
+  else
+  {
+    controlled_error_mm = 0.0f;
+  }
+
+  /* 偏移变化率在到达中心前撤销转向，避免累计航向造成回正后继续左转。 */
+  chassis_magnetic_yaw_rate_target_dps = CHASSIS_MAG_TARGET_SIGN *
+      ((CHASSIS_MAG_YAW_RATE_KP_DPS_PER_MM * controlled_error_mm) +
+       (CHASSIS_MAG_YAW_RATE_KD_DPS_PER_MM_S *
+        chassis_magnetic_offset_rate_mm_s));
+  chassis_magnetic_yaw_rate_target_dps = chassis_limit(
+      chassis_magnetic_yaw_rate_target_dps,
+      -CHASSIS_MAG_YAW_RATE_LIMIT_DPS,
+      CHASSIS_MAG_YAW_RATE_LIMIT_DPS);
+  /* 角速度积分成连续航向目标，允许磁条带动车体通过任意累计转角。 */
+  chassis_heading_target_deg = chassis_wrap_deg(
+      chassis_heading_target_deg +
+      (chassis_magnetic_yaw_rate_target_dps * dt_s));
+
+  absolute_offset_mm = chassis_abs_float(offset_error_mm);
+  minimum_speed_rpm = chassis_limit(CHASSIS_MAG_MIN_SPEED_RPM,
+                                    8.0f,
+                                    chassis_requested_run_rpm);
+  if(absolute_offset_mm <= CHASSIS_MAG_FULL_SPEED_OFFSET_MM)
+  {
+    speed_limit_target_rpm = chassis_requested_run_rpm;
+  }
+  else if(absolute_offset_mm >= CHASSIS_MAG_MIN_SPEED_OFFSET_MM)
+  {
+    speed_limit_target_rpm = minimum_speed_rpm;
+  }
+  else
+  {
+    speed_limit_target_rpm = chassis_requested_run_rpm -
+        ((chassis_requested_run_rpm - minimum_speed_rpm) *
+         (absolute_offset_mm - CHASSIS_MAG_FULL_SPEED_OFFSET_MM) /
+         (CHASSIS_MAG_MIN_SPEED_OFFSET_MM -
+          CHASSIS_MAG_FULL_SPEED_OFFSET_MM));
+  }
+  speed_limit_step_rpm = chassis_limit(
+      speed_limit_target_rpm - chassis_magnetic_speed_limit_rpm,
+      -CHASSIS_MAG_SPEED_LIMIT_FALL_RPM,
+      CHASSIS_MAG_SPEED_LIMIT_RISE_RPM);
+  chassis_magnetic_speed_limit_rpm = chassis_limit(
+      chassis_magnetic_speed_limit_rpm + speed_limit_step_rpm,
+      minimum_speed_rpm,
+      chassis_requested_run_rpm);
+  return 1U;
+}
+
 static int32_t chassis_rotation_target_counts(int32_t yaw_cdeg)
 {
   float wheel_arc_mm = (CHASSIS_CONTROL_PI *
@@ -252,6 +509,14 @@ static int32_t chassis_rotation_target_counts(int32_t yaw_cdeg)
 
 static float chassis_get_heading_deg(void)
 {
+  /*
+   * 循磁时磁条提供绝对横向基准，BMI270 Z轴承担角速度内环并积分路径航向。
+   * 编码器Yaw不参与循磁，避免缺脉冲把纠偏方向拖偏。
+   */
+  if(chassis_magnetic_follow_task != 0U)
+  {
+    return chassis_heading_fusion.gyro_yaw_deg;
+  }
   return chassis_heading_fusion.fused_yaw_deg;
 }
 
@@ -343,6 +608,7 @@ static void chassis_check_heading_consistency(void)
 {
   if((chassis_task_active == 0U) ||
      (chassis_rotation_task != 0U) ||
+     (chassis_magnetic_follow_task != 0U) ||
      (chassis_state == CHASSIS_STATE_CASTER_ALIGN) ||
      (chassis_state == CHASSIS_STATE_HEADING_RECOVER) ||
      (chassis_is_driving() == 0U))
@@ -557,6 +823,8 @@ static void chassis_cancel_active_task(void)
                              MOTION_COMMAND_ERROR_NONE,
                              CHASSIS_FAULT_NONE);
     chassis_task_active = 0U;
+    chassis_magnetic_follow_task = 0U;
+    chassis_magnetic_sample_valid = 0U;
   }
 }
 
@@ -606,6 +874,8 @@ static void chassis_complete_task(void)
                              MOTION_COMMAND_ERROR_NONE,
                              CHASSIS_FAULT_NONE);
     chassis_task_active = 0U;
+    chassis_magnetic_follow_task = 0U;
+    chassis_magnetic_sample_valid = 0U;
   }
 }
 
@@ -628,6 +898,8 @@ static void chassis_fail_task(uint16_t fault)
                              fault);
     chassis_task_active = 0U;
   }
+  chassis_magnetic_follow_task = 0U;
+  chassis_magnetic_sample_valid = 0U;
 }
 
 /* 在刹车前保留故障瞬间的目标、反馈和编码器诊断信息。 */
@@ -653,6 +925,12 @@ static void chassis_fail_motion(const char *reason)
 
 static float chassis_get_heading_limit(void)
 {
+  if(chassis_magnetic_follow_task != 0U)
+  {
+    return (chassis_state == CHASSIS_STATE_CASTER_ALIGN) ?
+           CHASSIS_MAG_CAPTURE_CORRECTION_LIMIT_RPM :
+           CHASSIS_MAG_TRACK_CORRECTION_LIMIT_RPM;
+  }
   if(chassis_state == CHASSIS_STATE_CASTER_ALIGN)
   {
     return CHASSIS_HEADING_ALIGN_LIMIT_RPM;
@@ -670,7 +948,10 @@ static void chassis_update_heading_targets(void)
   float yaw_deg = chassis_get_heading_deg();
   float yaw_rate_dps = imu_heading_get_rate_dps();
   float correction_limit = chassis_get_heading_limit();
+  float effective_base_rpm;
+  float yaw_rate_feedforward_rpm;
   float signed_base_rpm;
+  float target_limit_rpm;
 
   if(chassis_rotation_task != 0U)
   {
@@ -687,38 +968,74 @@ static void chassis_update_heading_targets(void)
     return;
   }
 
-  chassis_heading_error_deg = chassis_wrap_deg(chassis_heading_target_deg -
-                                               yaw_deg);
-  chassis_heading_correction_rpm =
-      (CHASSIS_HEADING_KP_RPM_PER_DEG * chassis_heading_error_deg) -
-      (CHASSIS_HEADING_KD_RPM_PER_DPS * yaw_rate_dps);
+  if((chassis_magnetic_follow_task != 0U) &&
+     (chassis_magnetic_sample_valid == 0U))
+  {
+    chassis_left_target_rpm = 0.0f;
+    chassis_right_target_rpm = 0.0f;
+    motor_speed_control_hold_brake();
+    return;
+  }
+
+  if(chassis_magnetic_follow_task != 0U)
+  {
+    /*
+     * 磁偏移外环直接给Yaw角速度；按差速运动学换算轮速前馈，再由BMI270
+     * Z轴角速度闭环补偿。回中时目标角速度立即归零，不保留累计航向滞后。
+     */
+    yaw_rate_feedforward_rpm =
+        chassis_magnetic_yaw_rate_target_dps * CHASSIS_CONTROL_PI *
+        CHASSIS_CONTROL_DRIVE_TRACK_MM * 30.0f /
+        (180.0f * CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM);
+    chassis_heading_error_deg = 0.0f;
+    chassis_heading_correction_rpm = yaw_rate_feedforward_rpm +
+        (CHASSIS_MAG_YAW_RATE_INNER_KP_RPM_PER_DPS *
+         (chassis_magnetic_yaw_rate_target_dps - yaw_rate_dps));
+  }
+  else
+  {
+    chassis_heading_error_deg = chassis_wrap_deg(chassis_heading_target_deg -
+                                                 yaw_deg);
+    chassis_heading_correction_rpm =
+        (CHASSIS_HEADING_KP_RPM_PER_DEG * chassis_heading_error_deg) -
+        (CHASSIS_HEADING_KD_RPM_PER_DPS * yaw_rate_dps);
+  }
   chassis_heading_correction_rpm *= CHASSIS_HEADING_CORRECTION_SIGN;
   chassis_heading_correction_rpm = chassis_limit(
       chassis_heading_correction_rpm, -correction_limit, correction_limit);
 
-  signed_base_rpm = chassis_base_rpm *
-                    (float)chassis_translation_direction;
+  effective_base_rpm = chassis_base_rpm;
+  if((chassis_magnetic_follow_task != 0U) &&
+     (effective_base_rpm > chassis_magnetic_speed_limit_rpm))
+  {
+    effective_base_rpm = chassis_magnetic_speed_limit_rpm;
+  }
+  signed_base_rpm = effective_base_rpm *
+                     (float)chassis_translation_direction;
   chassis_left_target_rpm = signed_base_rpm -
                             chassis_heading_correction_rpm;
   chassis_right_target_rpm = signed_base_rpm +
                              chassis_heading_correction_rpm;
+  target_limit_rpm = (chassis_magnetic_follow_task != 0U) ?
+                     CHASSIS_CONTROL_MAX_RUN_RPM :
+                     (CHASSIS_CONTROL_MAX_RUN_RPM + correction_limit);
   if(chassis_translation_direction > 0)
   {
     chassis_left_target_rpm = chassis_limit(
         chassis_left_target_rpm, 5.0f,
-        CHASSIS_CONTROL_MAX_RUN_RPM + correction_limit);
+        target_limit_rpm);
     chassis_right_target_rpm = chassis_limit(
         chassis_right_target_rpm, 5.0f,
-        CHASSIS_CONTROL_MAX_RUN_RPM + correction_limit);
+        target_limit_rpm);
   }
   else
   {
     chassis_left_target_rpm = chassis_limit(
         chassis_left_target_rpm,
-        -(CHASSIS_CONTROL_MAX_RUN_RPM + correction_limit), -5.0f);
+        -target_limit_rpm, -5.0f);
     chassis_right_target_rpm = chassis_limit(
         chassis_right_target_rpm,
-        -(CHASSIS_CONTROL_MAX_RUN_RPM + correction_limit), -5.0f);
+        -target_limit_rpm, -5.0f);
   }
   chassis_set_physical_targets(chassis_left_target_rpm,
                                chassis_right_target_rpm);
@@ -739,6 +1056,11 @@ static uint8_t chassis_encoder_mismatch(void)
             (progress_difference >=
              CHASSIS_CONTROL_ROTATE_MISMATCH_COUNTS)) ? 1U : 0U;
   }
+  /* 循磁会持续差速转向，累计轮差是正常控制结果，不能按纯直行失配处理。 */
+  if(chassis_magnetic_follow_task != 0U)
+  {
+    return 0U;
+  }
   return ((maximum_progress >= CHASSIS_CONTROL_ENCODER_CHECK_MIN_COUNTS) &&
           (progress_difference >=
            CHASSIS_CONTROL_ENCODER_MISMATCH_COUNTS)) ? 1U : 0U;
@@ -758,6 +1080,19 @@ static uint8_t chassis_caster_motion_stable(void)
           (speed_difference <= CHASSIS_CONTROL_CASTER_SPEED_DIFF_RPM) &&
           (chassis_abs_float(imu_heading_get_rate_dps()) <=
            CHASSIS_CONTROL_CASTER_STABLE_RATE_DPS)) ? 1U : 0U;
+}
+
+static float chassis_get_deceleration_distance_mm(void)
+{
+  float high_speed_ratio;
+
+  high_speed_ratio =
+      (chassis_requested_run_rpm - CHASSIS_CONTROL_LOW_SPEED_RUN_RPM) /
+      (CHASSIS_CONTROL_MAX_RUN_RPM - CHASSIS_CONTROL_LOW_SPEED_RUN_RPM);
+  high_speed_ratio = chassis_limit(high_speed_ratio, 0.0f, 1.0f);
+  return CHASSIS_CONTROL_DECEL_DISTANCE_MM +
+      ((CHASSIS_CONTROL_HIGH_SPEED_DECEL_DISTANCE_MM -
+        CHASSIS_CONTROL_DECEL_DISTANCE_MM) * high_speed_ratio);
 }
 
 static void chassis_update_deceleration(void)
@@ -792,7 +1127,7 @@ static void chassis_update_deceleration(void)
     remaining_distance_mm = 0.0f;
   }
   remaining_ratio = remaining_distance_mm /
-                    CHASSIS_CONTROL_DECEL_DISTANCE_MM;
+                    chassis_get_deceleration_distance_mm();
   remaining_ratio = chassis_limit(remaining_ratio, 0.0f, 1.0f);
   chassis_base_rpm = decel_end_rpm +
       ((chassis_requested_run_rpm - decel_end_rpm) * remaining_ratio);
@@ -926,7 +1261,13 @@ static void chassis_update_state(void)
          (chassis_state_center_progress >=
           CHASSIS_CONTROL_ALIGN_MAX_COUNTS))
       {
-        chassis_enter_state(CHASSIS_STATE_HEADING_RECOVER);
+        /*
+         * 循磁目标航向会随横向偏差逐帧变化，不能套用固定航向的稳定等待，
+         * 否则即使偏差持续收敛也会触发HEADING_RECOVER_TIMEOUT。
+         */
+        chassis_enter_state((chassis_magnetic_follow_task != 0U) ?
+                            CHASSIS_STATE_SPEED_RAMP :
+                            CHASSIS_STATE_HEADING_RECOVER);
       }
     }
   }
@@ -970,7 +1311,7 @@ static void chassis_update_state(void)
     if((rotation_decelerates != 0U) ||
        ((chassis_rotation_task == 0U) &&
         (chassis_get_translation_remaining_mm() <=
-         CHASSIS_CONTROL_DECEL_DISTANCE_MM)))
+         chassis_get_deceleration_distance_mm())))
     {
       chassis_enter_state(CHASSIS_STATE_DECELERATE);
     }
@@ -992,6 +1333,9 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     const motion_command_t *command)
 {
   const motion_goto_local_data_t *goto_data;
+  const motion_follow_mag_data_t *follow_data;
+  motion_goto_local_data_t follow_as_goto;
+  canfd_magnetic_sample_t magnetic_sample;
   uint8_t translation_task;
   uint8_t rotation_task;
 
@@ -1022,9 +1366,23 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     return MOTION_HANDLE_ACCEPTED;
   }
 
-  if(command->type == MOTION_CMD_GOTO_LOCAL)
+  if((command->type == MOTION_CMD_GOTO_LOCAL) ||
+     (command->type == MOTION_CMD_FOLLOW_MAG))
   {
-    goto_data = &command->data.goto_local;
+    if(command->type == MOTION_CMD_FOLLOW_MAG)
+    {
+      follow_data = &command->data.follow_mag;
+      memset(&follow_as_goto, 0, sizeof(follow_as_goto));
+      follow_as_goto.x_mm = follow_data->distance_mm;
+      follow_as_goto.speed_mm_s = follow_data->speed_mm_s;
+      follow_as_goto.timeout_ms = follow_data->timeout_ms;
+      goto_data = &follow_as_goto;
+    }
+    else
+    {
+      follow_data = NULL;
+      goto_data = &command->data.goto_local;
+    }
     translation_task =
         ((((goto_data->x_mm >= CHASSIS_CONTROL_MIN_DISTANCE_MM) &&
            (goto_data->x_mm <= CHASSIS_CONTROL_MAX_DISTANCE_MM)) ||
@@ -1058,7 +1416,9 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     }
     if(((translation_task == 0U) && (rotation_task == 0U)) ||
        (goto_data->speed_mm_s < CHASSIS_CONTROL_MIN_SPEED_MM_S) ||
-       (goto_data->speed_mm_s > CHASSIS_CONTROL_MAX_SPEED_MM_S))
+       (goto_data->speed_mm_s >
+        ((follow_data != NULL) ? CHASSIS_CONTROL_MAX_MAG_SPEED_MM_S :
+                                 CHASSIS_CONTROL_MAX_SPEED_MM_S)))
     {
       debug_uart_log_printf(
           "TASK_REJECT,%u,POSE_LIMIT,x=%ld,y=%ld,yaw=%ld,speed=%u\r\n",
@@ -1067,6 +1427,20 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
           goto_data->y_mm,
           goto_data->yaw_cdeg,
           (uint32_t)goto_data->speed_mm_s);
+      return MOTION_HANDLE_REJECTED;
+    }
+    if((follow_data != NULL) &&
+       (chassis_magnetic_sample_trackable(&magnetic_sample) == 0U))
+    {
+      debug_uart_log_printf(
+          "TASK_REJECT,%u,MAG_NOT_TRACKABLE,status=%u,flags=0x%02X,"
+          "strength=%u,offset=%d,age=%u\r\n",
+          (uint32_t)command->sequence,
+          (uint32_t)magnetic_sample.status,
+          (uint32_t)magnetic_sample.flags,
+          (uint32_t)magnetic_sample.strength,
+          (int)magnetic_sample.offset_x10mm,
+          (uint32_t)magnetic_sample.age_ms);
       return MOTION_HANDLE_REJECTED;
     }
 
@@ -1079,6 +1453,30 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     chassis_translation_direction =
         (goto_data->x_mm < 0L) ? -1 : 1;
     chassis_rotation_task = rotation_task;
+    chassis_magnetic_follow_task = (follow_data != NULL) ? 1U : 0U;
+    chassis_magnetic_sample_valid = chassis_magnetic_follow_task;
+    chassis_magnetic_invalid_ticks = 0U;
+    chassis_magnetic_target_offset_x10mm =
+        (follow_data != NULL) ? follow_data->target_offset_x10mm : 0;
+    chassis_magnetic_offset_x10mm =
+        (follow_data != NULL) ? magnetic_sample.offset_x10mm : 0;
+    chassis_magnetic_strength =
+        (follow_data != NULL) ? magnetic_sample.strength : 0U;
+    chassis_magnetic_age_ms =
+        (follow_data != NULL) ? magnetic_sample.age_ms : 0U;
+    chassis_magnetic_last_sequence =
+        (follow_data != NULL) ? magnetic_sample.sequence : 0U;
+    chassis_magnetic_sequence_valid =
+        (follow_data != NULL) ? 1U : 0U;
+    chassis_magnetic_last_receive_time_ms =
+        (follow_data != NULL) ? magnetic_sample.receive_time_ms : 0UL;
+    chassis_magnetic_last_offset_error_mm =
+        (follow_data != NULL) ?
+        (((float)magnetic_sample.offset_x10mm -
+          (float)follow_data->target_offset_x10mm) / 10.0f) : 0.0f;
+    chassis_magnetic_offset_rate_mm_s = 0.0f;
+    chassis_magnetic_yaw_rate_target_dps = 0.0f;
+    chassis_magnetic_speed_limit_rpm = 0.0f;
     chassis_rotation_confirmed = 0U;
     chassis_rotation_confirm_ticks = 0U;
     chassis_rotation_direction =
@@ -1100,6 +1498,13 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
         CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM,
         8.0f,
         CHASSIS_CONTROL_MAX_RUN_RPM);
+    if(follow_data != NULL)
+    {
+      chassis_magnetic_speed_limit_rpm = chassis_limit(
+          CHASSIS_MAG_MIN_SPEED_RPM,
+          8.0f,
+          chassis_requested_run_rpm);
+    }
     if(goto_data->timeout_ms != 0UL)
     {
       chassis_task_timeout_ticks =
@@ -1146,11 +1551,26 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     else
     {
       chassis_enter_state(CHASSIS_STATE_CASTER_ALIGN);
-      debug_uart_log_printf("TASK_START,%u,%ld,%u,%ld\r\n",
-                            (uint32_t)chassis_task_sequence,
-                            chassis_target_distance_mm,
-                            (uint32_t)goto_data->speed_mm_s,
-                            chassis_total_counts);
+      if(chassis_magnetic_follow_task != 0U)
+      {
+        debug_uart_log_printf(
+            "TASK_MAG_START,%u,%ld,%u,%ld,target=%d,offset=%d,strength=%u\r\n",
+            (uint32_t)chassis_task_sequence,
+            chassis_target_distance_mm,
+            (uint32_t)goto_data->speed_mm_s,
+            chassis_total_counts,
+            (int)chassis_magnetic_target_offset_x10mm,
+            (int)chassis_magnetic_offset_x10mm,
+            (uint32_t)chassis_magnetic_strength);
+      }
+      else
+      {
+        debug_uart_log_printf("TASK_START,%u,%ld,%u,%ld\r\n",
+                              (uint32_t)chassis_task_sequence,
+                              chassis_target_distance_mm,
+                              (uint32_t)goto_data->speed_mm_s,
+                              chassis_total_counts);
+      }
     }
     return MOTION_HANDLE_ACCEPTED;
   }
@@ -1224,12 +1644,16 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
 
   if(command->type == MOTION_CMD_CLEAR_FAULT)
   {
+    canfd_magnetic_sample_t clear_magnetic_sample;
+
     if(chassis_task_active != 0U)
     {
       return MOTION_HANDLE_BUSY;
     }
     if((((chassis_fault & CHASSIS_FAULT_CAN_BUSOFF) != 0U) &&
-        (canfd_protocol_is_bus_healthy() == 0U)) ||
+         (canfd_protocol_is_bus_healthy() == 0U)) ||
+       (((chassis_fault & CHASSIS_FAULT_MAGNETIC) != 0U) &&
+        (chassis_magnetic_sample_trackable(&clear_magnetic_sample) == 0U)) ||
        (imu_heading_get_status() != BMI2_OK) ||
        (bumper_safety_can_clear() == 0U))
     {
@@ -1244,6 +1668,8 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     motor_speed_control_resync_feedback();
     chassis_fault = CHASSIS_FAULT_NONE;
     chassis_motion_enabled = 0U;
+    chassis_magnetic_follow_task = 0U;
+    chassis_magnetic_sample_valid = 0U;
     chassis_reset_task_progress();
     chassis_enter_state(CHASSIS_STATE_IDLE);
     chassis_send_safety_can(1U);
@@ -1295,6 +1721,22 @@ static void chassis_send_telemetry(void)
       chassis_round_to_int(chassis_heading_fusion.disagreement_deg * 100.0f),
       chassis_heading_fusion.rejected_encoder_samples);
 
+  if(chassis_magnetic_follow_task != 0U)
+  {
+    debug_uart_log_printf(
+        "MAGFOLLOW,offset=%d,target=%d,strength=%u,age=%u,valid=%u,"
+        "heading=%ld,rate=%ld,offset_rate=%ld,speed_limit=%ld\r\n",
+        (int)chassis_magnetic_offset_x10mm,
+        (int)chassis_magnetic_target_offset_x10mm,
+        (uint32_t)chassis_magnetic_strength,
+        (uint32_t)chassis_magnetic_age_ms,
+        (uint32_t)chassis_magnetic_sample_valid,
+        chassis_round_to_int(chassis_heading_target_deg * 100.0f),
+        chassis_round_to_int(chassis_magnetic_yaw_rate_target_dps * 100.0f),
+        chassis_round_to_int(chassis_magnetic_offset_rate_mm_s * 100.0f),
+        chassis_round_to_int(chassis_magnetic_speed_limit_rpm * 100.0f));
+  }
+
   motor_status.uptime_ms = chassis_uptime_ms;
   motor_status.left_target_rpm_x100 = chassis_to_i16(
       chassis_round_to_int(chassis_left_target_rpm * 100.0f));
@@ -1331,6 +1773,7 @@ static uint8_t chassis_get_safety_source_mask(void)
   if((chassis_fault & (CHASSIS_FAULT_COMM_TIMEOUT |
                        CHASSIS_FAULT_CAN_BUSOFF |
                        CHASSIS_FAULT_IMU |
+                       CHASSIS_FAULT_MAGNETIC |
                        CHASSIS_FAULT_MOTION)) != 0U)
   {
     mask |= 0x04U;
@@ -1406,7 +1849,8 @@ static void chassis_send_drive_can(void)
 
   status.application_state = chassis_get_application_state();
   status.motion_state = chassis_get_motion_state();
-  status.motion_mode = (chassis_task_active != 0U) ? 1U : 0U;
+  status.motion_mode = (chassis_task_active == 0U) ? 0U :
+                       ((chassis_magnetic_follow_task != 0U) ? 2U : 1U);
   status.flags = 0x04U;
   if(canfd_protocol_is_session_valid() != 0U)
   {
@@ -1512,6 +1956,7 @@ void chassis_motion_controller_init(void)
 
   debug_uart_transport_init();
   motor_speed_control_init();
+  /* 编码器使用外部10kΩ上拉到5V，内部上下拉保持关闭。 */
   motor_speed_control_hold_brake();
   chassis_heading_fusion_init(&chassis_heading_fusion,
                               CHASSIS_HEADING_FUSION_TAU_S,
@@ -1546,6 +1991,20 @@ void chassis_motion_controller_init(void)
   chassis_rotation_task = 0U;
   chassis_rotation_confirmed = 0U;
   chassis_rotation_confirm_ticks = 0U;
+  chassis_magnetic_follow_task = 0U;
+  chassis_magnetic_sample_valid = 0U;
+  chassis_magnetic_invalid_ticks = 0U;
+  chassis_magnetic_target_offset_x10mm = 0;
+  chassis_magnetic_offset_x10mm = 0;
+  chassis_magnetic_strength = 0U;
+  chassis_magnetic_age_ms = 0U;
+  chassis_magnetic_last_sequence = 0U;
+  chassis_magnetic_sequence_valid = 0U;
+  chassis_magnetic_last_receive_time_ms = 0UL;
+  chassis_magnetic_last_offset_error_mm = 0.0f;
+  chassis_magnetic_offset_rate_mm_s = 0.0f;
+  chassis_magnetic_yaw_rate_target_dps = 0.0f;
+  chassis_magnetic_speed_limit_rpm = 0.0f;
   chassis_heading_disagreement_ticks = 0U;
   chassis_total_counts = 0L;
   chassis_heading_target_deg = 0.0f;
@@ -1608,6 +2067,11 @@ void chassis_motion_controller_step_10ms(void)
     chassis_update_heading_estimator(sample_dt_s);
   }
 
+  if((chassis_task_active != 0U) &&
+     (chassis_magnetic_follow_task != 0U))
+  {
+    (void)chassis_update_magnetic_follow(sample_dt_s);
+  }
   chassis_heading_error_deg = chassis_wrap_deg(
       chassis_heading_target_deg - chassis_get_heading_deg());
   chassis_check_heading_consistency();

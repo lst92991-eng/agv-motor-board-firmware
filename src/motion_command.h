@@ -19,6 +19,7 @@ typedef enum
 typedef enum
 {
   MOTION_CMD_GOTO_LOCAL = 1,
+  MOTION_CMD_FOLLOW_MAG,
   MOTION_CMD_STOP,
   MOTION_CMD_ESTOP,
   MOTION_CMD_RESET_ODOM,
@@ -66,6 +67,14 @@ typedef struct
 
 typedef struct
 {
+  int32_t distance_mm;
+  int16_t target_offset_x10mm;
+  uint16_t speed_mm_s;
+  uint32_t timeout_ms;
+} motion_follow_mag_data_t;
+
+typedef struct
+{
   int16_t linear_mm_s;
   int16_t angular_mrad_s;
   uint16_t accel_mm_s2;
@@ -83,6 +92,7 @@ typedef struct
   union
   {
     motion_goto_local_data_t goto_local;
+    motion_follow_mag_data_t follow_mag;
     motion_velocity_data_t velocity;
   } data;
 } motion_command_t;

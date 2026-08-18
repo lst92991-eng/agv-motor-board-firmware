@@ -126,6 +126,8 @@ static uint8_t canfd_tx_inflight;
 static uint8_t canfd_tx_link_fault_reported;
 static uint32_t canfd_tx_started_ms;
 static canfd_tx_queue_t *canfd_tx_active_queue;
+static canfd_magnetic_sample_t canfd_magnetic_sample;
+static volatile uint32_t canfd_magnetic_generation;
 
 static uint8_t canfd_dlc_to_size(can_data_length_type data_length)
 {
@@ -167,6 +169,11 @@ static uint32_t canfd_get_u32(const uint8_t *data)
          ((uint32_t)data[1] << 8U) |
          ((uint32_t)data[2] << 16U) |
          ((uint32_t)data[3] << 24U);
+}
+
+static int16_t canfd_get_i16(const uint8_t *data)
+{
+  return (int16_t)canfd_get_u16(data);
 }
 
 static int32_t canfd_get_i32(const uint8_t *data)
@@ -533,6 +540,7 @@ static void canfd_parse_command(const canfd_frame_t *frame)
   uint32_t session_id;
   uint8_t command_code;
   uint8_t session_required = 1U;
+  int32_t arg1;
   int32_t arg3;
 
   if(frame->data_size != 32U)
@@ -619,6 +627,27 @@ static void canfd_parse_command(const canfd_frame_t *frame)
     command.data.goto_local.speed_mm_s = (uint16_t)arg3;
     command.data.goto_local.timeout_ms = canfd_get_u32(&frame->data[28]);
   }
+  else if(command_code == CANFD_COMMAND_FOLLOW_MAG_START)
+  {
+    arg1 = canfd_get_i32(&frame->data[16]);
+    arg3 = canfd_get_i32(&frame->data[24]);
+    if((arg1 < -32768L) || (arg1 > 32767L) ||
+       (arg3 < 0L) || (arg3 > 65535L) ||
+       (canfd_get_i32(&frame->data[20]) != 0L) ||
+       (canfd_get_u32(&frame->data[28]) == 0UL) ||
+       (canfd_get_u32(&frame->data[28]) > CANFD_TASK_TIMEOUT_MAX_MS))
+    {
+      canfd_send_result(command_id, session_id,
+                        CANFD_RESULT_STAGE_REJECTED,
+                        CANFD_RESULT_OUT_OF_RANGE, 0U);
+      return;
+    }
+    command.type = MOTION_CMD_FOLLOW_MAG;
+    command.data.follow_mag.distance_mm = canfd_get_i32(&frame->data[12]);
+    command.data.follow_mag.target_offset_x10mm = (int16_t)arg1;
+    command.data.follow_mag.speed_mm_s = (uint16_t)arg3;
+    command.data.follow_mag.timeout_ms = canfd_get_u32(&frame->data[28]);
+  }
   else if(command_code == CANFD_COMMAND_STOP)
   {
     command.type = MOTION_CMD_STOP;
@@ -641,8 +670,6 @@ static void canfd_parse_command(const canfd_frame_t *frame)
   {
     canfd_send_result(command_id, session_id,
                       CANFD_RESULT_STAGE_REJECTED,
-                      (command_code == CANFD_COMMAND_FOLLOW_MAG_START) ?
-                      CANFD_RESULT_UNSUPPORTED_PARAMETER :
                       CANFD_RESULT_UNSUPPORTED_COMMAND,
                       command_code);
     return;
@@ -719,9 +746,60 @@ static void canfd_parse_velocity(const canfd_frame_t *frame)
   /* 当前固件不公布速度流能力，收到预留RPDO时保持现有安全输出。 */
 }
 
+static void canfd_parse_magnetic(const canfd_frame_t *frame)
+{
+  canfd_magnetic_sample_t sample;
+  uint32_t interrupt_state;
+  uint8_t index;
+
+  if(frame->data_size != 48U)
+  {
+    return;
+  }
+
+  memset(&sample, 0, sizeof(sample));
+  sample.sample_time_ms = canfd_get_u32(&frame->data[0]);
+  sample.receive_time_ms = canfd_now_ms;
+  sample.sequence = canfd_get_u16(&frame->data[4]);
+  sample.status = frame->data[6];
+  sample.flags = frame->data[7];
+  sample.active_mask = canfd_get_u16(&frame->data[8]);
+  sample.offset_x10mm = canfd_get_i16(&frame->data[10]);
+  sample.strength = canfd_get_u16(&frame->data[12]);
+  sample.width_x10mm = canfd_get_u16(&frame->data[14]);
+  for(index = 0U; index < 8U; index++)
+  {
+    sample.signal[index] = canfd_get_u16(&frame->data[32U + (index * 2U)]);
+  }
+  sample.protocol_valid = ((sample.status <= 3U) &&
+                           ((sample.flags & 0xF8U) == 0U) &&
+                           ((sample.active_mask & 0xFF00U) == 0U)) ? 1U : 0U;
+  sample.received = 1U;
+
+  /*
+   * CAN任务优先级低于控制任务，发布半帧时若被抢占，读端无法等待写端完成。
+   * 极短临界区只覆盖RAM快照复制，避免把合法磁帧误判为持续丢失。
+   */
+  interrupt_state = __get_PRIMASK();
+  __disable_irq();
+  canfd_magnetic_generation++;
+  __DMB();
+  canfd_magnetic_sample = sample;
+  __DMB();
+  canfd_magnetic_generation++;
+  if(interrupt_state == 0UL)
+  {
+    __enable_irq();
+  }
+}
+
 static void canfd_parse_frame(const canfd_frame_t *frame)
 {
-  if(frame->id == CANFD_ID_CHASSIS_COMMAND)
+  if(frame->id == CANFD_ID_MAGNETIC_TPDO1)
+  {
+    canfd_parse_magnetic(frame);
+  }
+  else if(frame->id == CANFD_ID_CHASSIS_COMMAND)
   {
     canfd_parse_command(frame);
   }
@@ -1029,6 +1107,8 @@ void canfd_protocol_init(motion_command_handler_t handler, void *context)
   canfd_tx_link_fault_reported = 0U;
   canfd_tx_started_ms = 0UL;
   canfd_tx_active_queue = NULL;
+  memset(&canfd_magnetic_sample, 0, sizeof(canfd_magnetic_sample));
+  canfd_magnetic_generation = 0UL;
   canfd_hardware_init();
 }
 
@@ -1138,7 +1218,8 @@ void canfd_protocol_send_motion_result(
                  fault_mask, state);
   if(result == MOTION_HANDLE_ACCEPTED)
   {
-    if(command->type == MOTION_CMD_GOTO_LOCAL)
+    if((command->type == MOTION_CMD_GOTO_LOCAL) ||
+       (command->type == MOTION_CMD_FOLLOW_MAG))
     {
       canfd_send_result(command->sequence, command->session_id,
                         CANFD_RESULT_STAGE_EXECUTING,
@@ -1323,4 +1404,45 @@ uint32_t canfd_protocol_get_rx_drop_count(void)
 uint32_t canfd_protocol_get_tx_drop_count(void)
 {
   return canfd_tx_drop_count;
+}
+
+uint8_t canfd_protocol_get_magnetic_sample(
+    canfd_magnetic_sample_t *sample)
+{
+  canfd_magnetic_sample_t snapshot;
+  uint32_t generation_before;
+  uint32_t generation_after;
+  uint8_t attempt;
+
+  if(sample == NULL)
+  {
+    return 0U;
+  }
+  for(attempt = 0U; attempt < 3U; attempt++)
+  {
+    generation_before = canfd_magnetic_generation;
+    if((generation_before & 1UL) != 0UL)
+    {
+      continue;
+    }
+    __DMB();
+    snapshot = canfd_magnetic_sample;
+    __DMB();
+    generation_after = canfd_magnetic_generation;
+    if((generation_before == generation_after) &&
+       ((generation_after & 1UL) == 0UL))
+    {
+      if(snapshot.received == 0U)
+      {
+        return 0U;
+      }
+      snapshot.age_ms = (uint16_t)(((canfd_now_ms -
+                                     snapshot.receive_time_ms) > 65535UL) ?
+                                   65535UL :
+                                   (canfd_now_ms - snapshot.receive_time_ms));
+      *sample = snapshot;
+      return 1U;
+    }
+  }
+  return 0U;
 }
