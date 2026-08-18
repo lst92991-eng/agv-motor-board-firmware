@@ -53,6 +53,9 @@ $commands = [System.Collections.Generic.List[string]]::new()
   'init',
   'halt',
   'wait_halt 3000',
+  # 先用SYSRESETREQ回到复位态，再装载FLM，避免运行中外设/异常状态影响算法。
+  'reset halt',
+  'wait_halt 3000',
   'reg primask 1',
   'mww 0xE000E010 0',
   # TMR8 主输出与四路比较值清零，避免停核时保留旧 PWM。

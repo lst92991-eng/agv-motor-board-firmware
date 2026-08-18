@@ -1209,8 +1209,25 @@ void canfd_protocol_send_odom_status(const canfd_odom_status_t *status)
 
 void canfd_protocol_send_motor_status(const canfd_motor_status_t *status)
 {
-  /* V0.1没有私有电机诊断PDO，保留接口仅供旧台架代码编译。 */
-  (void)status;
+  uint8_t data[32] = {0};
+
+  if(status == NULL)
+  {
+    return;
+  }
+  canfd_put_u32(&data[0], status->uptime_ms);
+  canfd_put_i16(&data[4], status->left_target_rpm_x100);
+  canfd_put_i16(&data[6], status->right_target_rpm_x100);
+  canfd_put_i16(&data[8], status->left_measured_rpm_x100);
+  canfd_put_i16(&data[10], status->right_measured_rpm_x100);
+  canfd_put_i16(&data[12], status->left_pwm);
+  canfd_put_i16(&data[14], status->right_pwm);
+  canfd_put_i32(&data[16], status->left_encoder_count);
+  canfd_put_i32(&data[20], status->right_encoder_count);
+  data[24] = status->left_invalid_count;
+  data[25] = status->right_invalid_count;
+  data[26] = status->state;
+  (void)canfd_queue_payload(CANFD_ID_MOTOR_DIAGNOSTIC, data, 32U, 0U);
 }
 
 void canfd_protocol_send_safety_status(

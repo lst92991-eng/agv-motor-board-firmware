@@ -1,10 +1,10 @@
 /**
   *****************************************************************************
   * @file     imu_heading.c
-  * @brief    BMI270 ¶ÌÊ±Ïà¶Ôº½Ïò¹À¼Æ
+  * @brief    BMI270 çŸ­æ—¶ç›¸å¯¹èˆªå‘ä¼°è®¡
   *
-  * µ±Ç°¿ª·¢°åÃ»ÓĞ´ÅÁ¦¼Æ£¬Òò´Ë±¾Ä£¿éÊ¹ÓÃÍÓÂİÒÇ Y Öá»ı·ÖµÃµ½Ïà¶Ôº½Ïò½Ç¡£
-  * ¸Ã½á¹ûÊÊºÏÔÚÒ»´ÎÇ°½ø¡¢ÖÆ¶¯ºÍºóÍË²âÊÔÖĞÒÖÖÆÆ«º½£¬²»ÊÊºÏ×÷Îª³¤ÆÚ¾ø¶Ôº½Ïò¡£
+  * å½“å‰å¼€å‘æ¿æ²¡æœ‰ç£åŠ›è®¡ã€‚æ¨¡å—åœ¨ä¸Šç”µé™æ­¢æ—¶ç”¨é‡åŠ›ç¡®å®šè½¦è¾†ç«–ç›´è½´ï¼Œå°†ä¸‰è½´
+  * é™€èºä»ªæŠ•å½±åˆ°è¯¥è½´åç§¯åˆ†ç›¸å¯¹èˆªå‘ï¼›ç»“æœä»ä¸ç­‰ä»·äºé•¿æœŸç»å¯¹èˆªå‘ã€‚
   *****************************************************************************
   */
 
@@ -31,17 +31,27 @@
 #define IMU_HEADING_CALIB_DELAY_MS              10U
 #define IMU_HEADING_CALIB_MAX_ATTEMPTS          800U
 #define IMU_HEADING_GYRO_RANGE_DPS              2000L
+#define IMU_HEADING_ACCEL_RANGE_G                  2.0f
+#define IMU_HEADING_MIN_GRAVITY_RATIO              0.70f
+#define IMU_HEADING_MAX_GRAVITY_RATIO              1.30f
 #define IMU_HEADING_FILTER_RC_S                  0.03183099f
 #define IMU_HEADING_RATE_STEP_LIMIT_DPS          20.0f
 #define IMU_HEADING_DEADBAND_SIGMA_MULTIPLIER     3.0f
 #define IMU_HEADING_DEADBAND_MIN_DPS              0.08f
 #define IMU_HEADING_DEADBAND_MAX_DPS              0.30f
+#define IMU_HEADING_CALIB_MAX_SIGMA_DPS            1.00f
+#define IMU_HEADING_YAW_SIGN                         1.0f
 
 static uint8_t imu_heading_spi_mode3;
 static uint8_t imu_heading_read_dummy = 1U;
 static struct bmi2_dev imu_heading_dev;
 static int8_t imu_heading_status = BMI2_E_COM_FAIL;
-static float imu_heading_gyro_zero_dps;
+static float imu_heading_gyro_x_zero_dps;
+static float imu_heading_gyro_y_zero_dps;
+static float imu_heading_gyro_z_zero_dps;
+static float imu_heading_vertical_x;
+static float imu_heading_vertical_y;
+static float imu_heading_vertical_z;
 static float imu_heading_yaw_deg;
 static float imu_heading_rate_dps;
 static float imu_heading_raw_rate_dps;
@@ -100,7 +110,7 @@ static uint8_t imu_heading_miso_read(void)
                                    IMU_HEADING_MISO_PIN) != RESET) ? 1U : 0U;
 }
 
-/* ³õÊ¼»¯Èí¼ş SPI Òı½Å£¬²¢¸ù¾İÌ½²â½á¹ûÉèÖÃÊ±ÖÓ¿ÕÏĞµçÆ½¡£ */
+/* åˆå§‹åŒ–è½¯ä»¶ SPI å¼•è„šï¼Œå¹¶æ ¹æ®æ¢æµ‹ç»“æœè®¾ç½®æ—¶é’Ÿç©ºé—²ç”µå¹³ã€‚ */
 static void imu_heading_spi_gpio_init(void)
 {
   gpio_init_type gpio_init_struct;
@@ -137,7 +147,7 @@ static void imu_heading_spi_gpio_init(void)
   }
 }
 
-/* Èí¼ş SPI °´×î¸ßÎ»ÓÅÏÈÊÕ·¢Ò»¸ö×Ö½Ú£¬Ö§³Ö mode0 ºÍ mode3¡£ */
+/* è½¯ä»¶ SPI æŒ‰æœ€é«˜ä½ä¼˜å…ˆæ”¶å‘ä¸€ä¸ªå­—èŠ‚ï¼Œæ”¯æŒ mode0 å’Œ mode3ã€‚ */
 static uint8_t imu_heading_spi_transfer(uint8_t tx_data)
 {
   uint8_t rx_data = 0U;
@@ -176,7 +186,7 @@ static uint8_t imu_heading_spi_transfer(uint8_t tx_data)
   return rx_data;
 }
 
-/* Æô¶¯½×¶ÎÖ±½Ó¶ÁÈ¡¼Ä´æÆ÷£¬ÓÃÓÚÌ½²â SPI Ä£Ê½ºÍ¶ÁÈ¡¿Õ×Ö½ÚÒªÇó¡£ */
+/* å¯åŠ¨é˜¶æ®µç›´æ¥è¯»å–å¯„å­˜å™¨ï¼Œç”¨äºæ¢æµ‹ SPI æ¨¡å¼å’Œè¯»å–ç©ºå­—èŠ‚è¦æ±‚ã€‚ */
 static uint8_t imu_heading_reg_read(uint8_t reg, uint8_t dummy_enable)
 {
   uint8_t value;
@@ -259,7 +269,7 @@ static void imu_heading_api_delay_us(uint32_t period, void *intf_ptr)
   }
 }
 
-/* Í¬Ê±³¢ÊÔËÄÖÖ¶Á·¨£¬±ÜÃâ²»Í¬ÉÏµç×´Ì¬ÏÂ´íÎó¶Áµ½ 0x21 »ò 0x00¡£ */
+/* åŒæ—¶å°è¯•å››ç§è¯»æ³•ï¼Œé¿å…ä¸åŒä¸Šç”µçŠ¶æ€ä¸‹é”™è¯¯è¯»åˆ° 0x21 æˆ– 0x00ã€‚ */
 static int8_t imu_heading_probe_spi(void)
 {
   uint8_t id_mode0_dummy;
@@ -325,30 +335,37 @@ static int8_t imu_heading_probe_spi(void)
 static int8_t imu_heading_config_sensor(void)
 {
   int8_t result;
-  struct bmi2_sens_config config;
-  uint8_t sensor = BMI2_GYRO;
+  struct bmi2_sens_config config[2];
+  uint8_t sensors[2] = { BMI2_ACCEL, BMI2_GYRO };
 
-  config.type = BMI2_GYRO;
-  result = bmi2_get_sensor_config(&config, 1U, &imu_heading_dev);
+  config[0].type = BMI2_ACCEL;
+  config[1].type = BMI2_GYRO;
+  result = bmi2_get_sensor_config(config, 2U, &imu_heading_dev);
   if(result != BMI2_OK)
   {
     return result;
   }
 
-  /* º½Ïò¿ØÖÆ²ÉÓÃ 200Hz¡¢Õı¸º 2000dps£¬²¢¿ªÆôĞÔÄÜÓÅÏÈÂË²¨¡£ */
-  config.cfg.gyr.odr = BMI2_GYR_ODR_200HZ;
-  config.cfg.gyr.range = BMI2_GYR_RANGE_2000;
-  config.cfg.gyr.bwp = BMI2_GYR_NORMAL_MODE;
-  config.cfg.gyr.noise_perf = BMI2_POWER_OPT_MODE;
-  config.cfg.gyr.filter_perf = BMI2_PERF_OPT_MODE;
+  /* åŠ é€Ÿåº¦è®¡åªåœ¨é™æ­¢æ ¡å‡†é˜¶æ®µç¡®å®šè½¦è¾†ç«–ç›´è½´ï¼Œä¸å‚ä¸ Yaw ç»å¯¹æ ¡æ­£ã€‚ */
+  config[0].cfg.acc.odr = BMI2_ACC_ODR_200HZ;
+  config[0].cfg.acc.range = BMI2_ACC_RANGE_2G;
+  config[0].cfg.acc.bwp = BMI2_ACC_NORMAL_AVG4;
+  config[0].cfg.acc.filter_perf = BMI2_PERF_OPT_MODE;
 
-  result = bmi2_set_sensor_config(&config, 1U, &imu_heading_dev);
+  /* ä¸‰è½´é™€èºä»ªç»Ÿä¸€é‡‡ç”¨ 200Hzã€æ­£è´Ÿ 2000dpsã€‚ */
+  config[1].cfg.gyr.odr = BMI2_GYR_ODR_200HZ;
+  config[1].cfg.gyr.range = BMI2_GYR_RANGE_2000;
+  config[1].cfg.gyr.bwp = BMI2_GYR_NORMAL_MODE;
+  config[1].cfg.gyr.noise_perf = BMI2_POWER_OPT_MODE;
+  config[1].cfg.gyr.filter_perf = BMI2_PERF_OPT_MODE;
+
+  result = bmi2_set_sensor_config(config, 2U, &imu_heading_dev);
   if(result != BMI2_OK)
   {
     return result;
   }
 
-  return bmi2_sensor_enable(&sensor, 1U, &imu_heading_dev);
+  return bmi2_sensor_enable(sensors, 2U, &imu_heading_dev);
 }
 
 static float imu_heading_raw_to_dps(int16_t raw_value)
@@ -357,16 +374,33 @@ static float imu_heading_raw_to_dps(int16_t raw_value)
   return ((float)raw_value * (float)IMU_HEADING_GYRO_RANGE_DPS) / (float)half_scale;
 }
 
-/* ÉÏµç²É¼¯ 128 ¸öÓĞĞ§Ñù±¾£¬³µÁ¾ÒÆ¶¯»áÖ±½ÓÔì³ÉºóĞøº½Ïò³ÖĞøÆ«ÒÆ¡£ */
+/* ä¸Šç”µé™æ­¢é‡‡æ ·ï¼šä¼°è®¡ä¸‰è½´é›¶åï¼Œå¹¶ç”±é‡åŠ›æ–¹å‘ç¡®å®šè½¦è¾†ç«–ç›´è½´ã€‚ */
 static int8_t imu_heading_calibrate(void)
 {
   int8_t result = BMI2_E_COM_FAIL;
   struct bmi2_sens_data sensor_data;
   uint16_t valid_count = 0U;
   uint16_t attempt_count = 0U;
-  float gyro_sum = 0.0f;
-  float gyro_square_sum = 0.0f;
-  float gyro_sample_dps;
+  float gyro_x_sum = 0.0f;
+  float gyro_y_sum = 0.0f;
+  float gyro_z_sum = 0.0f;
+  float gyro_x_square_sum = 0.0f;
+  float gyro_y_square_sum = 0.0f;
+  float gyro_z_square_sum = 0.0f;
+  float gyro_xy_sum = 0.0f;
+  float gyro_xz_sum = 0.0f;
+  float gyro_yz_sum = 0.0f;
+  float accel_x_sum = 0.0f;
+  float accel_y_sum = 0.0f;
+  float accel_z_sum = 0.0f;
+  float gyro_x_dps;
+  float gyro_y_dps;
+  float gyro_z_dps;
+  float accel_norm;
+  float expected_one_g;
+  float gravity_ratio;
+  float projected_mean_dps;
+  float projected_square_mean;
   float noise_variance;
 
   printf("BMI270 heading calibration, keep vehicle still...\r\n");
@@ -376,11 +410,25 @@ static int8_t imu_heading_calibrate(void)
     delay_ms(IMU_HEADING_CALIB_DELAY_MS);
     attempt_count++;
     result = bmi2_get_sensor_data(&sensor_data, &imu_heading_dev);
-    if((result == BMI2_OK) && ((sensor_data.status & BMI2_DRDY_GYR) != 0U))
+    if((result == BMI2_OK) &&
+       ((sensor_data.status & BMI2_DRDY_GYR) != 0U) &&
+       ((sensor_data.status & BMI2_DRDY_ACC) != 0U))
     {
-      gyro_sample_dps = imu_heading_raw_to_dps(sensor_data.gyr.y);
-      gyro_sum += gyro_sample_dps;
-      gyro_square_sum += gyro_sample_dps * gyro_sample_dps;
+      gyro_x_dps = imu_heading_raw_to_dps(sensor_data.gyr.x);
+      gyro_y_dps = imu_heading_raw_to_dps(sensor_data.gyr.y);
+      gyro_z_dps = imu_heading_raw_to_dps(sensor_data.gyr.z);
+      gyro_x_sum += gyro_x_dps;
+      gyro_y_sum += gyro_y_dps;
+      gyro_z_sum += gyro_z_dps;
+      gyro_x_square_sum += gyro_x_dps * gyro_x_dps;
+      gyro_y_square_sum += gyro_y_dps * gyro_y_dps;
+      gyro_z_square_sum += gyro_z_dps * gyro_z_dps;
+      gyro_xy_sum += gyro_x_dps * gyro_y_dps;
+      gyro_xz_sum += gyro_x_dps * gyro_z_dps;
+      gyro_yz_sum += gyro_y_dps * gyro_z_dps;
+      accel_x_sum += (float)sensor_data.acc.x;
+      accel_y_sum += (float)sensor_data.acc.y;
+      accel_z_sum += (float)sensor_data.acc.z;
       valid_count++;
     }
   }
@@ -391,15 +439,59 @@ static int8_t imu_heading_calibrate(void)
     return (result == BMI2_OK) ? BMI2_E_COM_FAIL : result;
   }
 
-  imu_heading_gyro_zero_dps = gyro_sum / (float)valid_count;
-  noise_variance = (gyro_square_sum / (float)valid_count) -
-                   (imu_heading_gyro_zero_dps *
-                    imu_heading_gyro_zero_dps);
+  imu_heading_gyro_x_zero_dps = gyro_x_sum / (float)valid_count;
+  imu_heading_gyro_y_zero_dps = gyro_y_sum / (float)valid_count;
+  imu_heading_gyro_z_zero_dps = gyro_z_sum / (float)valid_count;
+  imu_heading_vertical_x = accel_x_sum / (float)valid_count;
+  imu_heading_vertical_y = accel_y_sum / (float)valid_count;
+  imu_heading_vertical_z = accel_z_sum / (float)valid_count;
+  accel_norm = sqrtf((imu_heading_vertical_x * imu_heading_vertical_x) +
+                     (imu_heading_vertical_y * imu_heading_vertical_y) +
+                     (imu_heading_vertical_z * imu_heading_vertical_z));
+  expected_one_g = ((float)(1UL << (imu_heading_dev.resolution - 1U))) /
+                   IMU_HEADING_ACCEL_RANGE_G;
+  gravity_ratio = accel_norm / expected_one_g;
+  if((gravity_ratio < IMU_HEADING_MIN_GRAVITY_RATIO) ||
+     (gravity_ratio > IMU_HEADING_MAX_GRAVITY_RATIO))
+  {
+    printf("BMI270 heading gravity invalid ratio=%.3f\r\n", gravity_ratio);
+    return BMI2_E_COM_FAIL;
+  }
+  imu_heading_vertical_x /= accel_norm;
+  imu_heading_vertical_y /= accel_norm;
+  imu_heading_vertical_z /= accel_norm;
+  /* é™æ­¢åŠ é€Ÿåº¦è®¡çš„ +1g æ–¹å‘å³ç‰©ç†å‘ä¸Šï¼Œç›´æ¥ä¿ç•™å…¶ç¬¦å·ä»¥å®šä¹‰æ­£ Yawã€‚ */
+
+  projected_mean_dps =
+      (imu_heading_gyro_x_zero_dps * imu_heading_vertical_x) +
+      (imu_heading_gyro_y_zero_dps * imu_heading_vertical_y) +
+      (imu_heading_gyro_z_zero_dps * imu_heading_vertical_z);
+  projected_square_mean =
+      ((gyro_x_square_sum * imu_heading_vertical_x *
+        imu_heading_vertical_x) +
+       (gyro_y_square_sum * imu_heading_vertical_y *
+        imu_heading_vertical_y) +
+       (gyro_z_square_sum * imu_heading_vertical_z *
+        imu_heading_vertical_z) +
+       (2.0f * gyro_xy_sum * imu_heading_vertical_x *
+        imu_heading_vertical_y) +
+       (2.0f * gyro_xz_sum * imu_heading_vertical_x *
+        imu_heading_vertical_z) +
+       (2.0f * gyro_yz_sum * imu_heading_vertical_y *
+        imu_heading_vertical_z)) / (float)valid_count;
+  noise_variance = projected_square_mean -
+                   (projected_mean_dps * projected_mean_dps);
   if(noise_variance < 0.0f)
   {
     noise_variance = 0.0f;
   }
   imu_heading_noise_sigma_dps = sqrtf(noise_variance);
+  if(imu_heading_noise_sigma_dps > IMU_HEADING_CALIB_MAX_SIGMA_DPS)
+  {
+    printf("BMI270 heading calibration moving sigma=%.3f dps\r\n",
+           imu_heading_noise_sigma_dps);
+    return BMI2_E_COM_FAIL;
+  }
   imu_heading_deadband_dps = imu_heading_limit(
       imu_heading_noise_sigma_dps *
       IMU_HEADING_DEADBAND_SIGMA_MULTIPLIER,
@@ -409,8 +501,14 @@ static int8_t imu_heading_calibrate(void)
   imu_heading_rate_dps = 0.0f;
   imu_heading_raw_rate_dps = 0.0f;
   imu_heading_filtered_rate_dps = 0.0f;
-  printf("heading gyro_y_zero=%.3f sigma=%.3f deadband=%.3f dps samples=%u\r\n",
-         imu_heading_gyro_zero_dps,
+  printf("heading gyro_zero=%.3f,%.3f,%.3f axis=%.3f,%.3f,%.3f "
+         "sigma=%.3f deadband=%.3f dps samples=%u\r\n",
+         imu_heading_gyro_x_zero_dps,
+         imu_heading_gyro_y_zero_dps,
+         imu_heading_gyro_z_zero_dps,
+         imu_heading_vertical_x,
+         imu_heading_vertical_y,
+         imu_heading_vertical_z,
          imu_heading_noise_sigma_dps,
          imu_heading_deadband_dps,
          valid_count);
@@ -460,6 +558,9 @@ int8_t imu_heading_update(float dt_s)
 {
   int8_t result;
   struct bmi2_sens_data sensor_data;
+  float gyro_x_dps;
+  float gyro_y_dps;
+  float gyro_z_dps;
   float rate_delta_dps;
   float limited_rate_dps;
   float filter_alpha;
@@ -478,11 +579,20 @@ int8_t imu_heading_update(float dt_s)
 
   if((sensor_data.status & BMI2_DRDY_GYR) != 0U)
   {
-    imu_heading_raw_rate_dps =
-        imu_heading_raw_to_dps(sensor_data.gyr.y) -
-        imu_heading_gyro_zero_dps;
+    gyro_x_dps = imu_heading_raw_to_dps(sensor_data.gyr.x) -
+                 imu_heading_gyro_x_zero_dps;
+    gyro_y_dps = imu_heading_raw_to_dps(sensor_data.gyr.y) -
+                 imu_heading_gyro_y_zero_dps;
+    gyro_z_dps = imu_heading_raw_to_dps(sensor_data.gyr.z) -
+                 imu_heading_gyro_z_zero_dps;
+    /* å°†ä¸‰è½´è§’é€Ÿåº¦æŠ•å½±åˆ°ä¸Šç”µé™æ­¢æ—¶ç”±é‡åŠ›ç¡®å®šçš„è½¦è¾†ç«–ç›´è½´ã€‚ */
+    /* è½¦è¾†åæ ‡çº¦å®šï¼šX å‘å‰ã€Y å‘å·¦ã€Z å‘ä¸Šï¼Œè½¦å¤´å·¦è½¬ä¸ºæ­£ã€‚ */
+    imu_heading_raw_rate_dps = IMU_HEADING_YAW_SIGN *
+        ((gyro_x_dps * imu_heading_vertical_x) +
+         (gyro_y_dps * imu_heading_vertical_y) +
+         (gyro_z_dps * imu_heading_vertical_z));
 
-    /* ÏÈÏŞÖÆµ¥ÖÜÆÚÍ»±ä£¬ÔÙ°´Êµ¼Ê²ÉÑùÖÜÆÚÖ´ĞĞ5HzÒ»½×µÍÍ¨¡£ */
+    /* å…ˆé™åˆ¶å•å‘¨æœŸçªå˜ï¼Œå†æŒ‰å®é™…é‡‡æ ·å‘¨æœŸæ‰§è¡Œ 5Hz ä¸€é˜¶ä½é€šã€‚ */
     rate_delta_dps = imu_heading_raw_rate_dps -
                      imu_heading_filtered_rate_dps;
     rate_delta_dps = imu_heading_limit(
@@ -495,7 +605,7 @@ int8_t imu_heading_update(float dt_s)
     imu_heading_filtered_rate_dps += filter_alpha *
         (limited_rate_dps - imu_heading_filtered_rate_dps);
 
-    /* Èı±¶¾²Ö¹ÔëÉùËÀÇøÖ»×÷ÓÃÓÚ¿ØÖÆÊä³ö£¬µÍÍ¨ÄÚ²¿×´Ì¬±£³ÖÁ¬Ğø¡£ */
+    /* ä¸‰å€é™æ­¢å™ªå£°æ­»åŒºåªä½œç”¨äºæ§åˆ¶è¾“å‡ºï¼Œä½é€šå†…éƒ¨çŠ¶æ€ä¿æŒè¿ç»­ã€‚ */
     if(imu_heading_abs_float(imu_heading_filtered_rate_dps) <=
        imu_heading_deadband_dps)
     {

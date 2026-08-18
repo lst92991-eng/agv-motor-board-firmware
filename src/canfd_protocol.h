@@ -19,6 +19,7 @@ extern "C" {
 #define CANFD_ID_ODOM_STATUS                 0x381U
 #define CANFD_ID_VELOCITY                    0x401U
 #define CANFD_ID_SAFETY_STATUS               0x481U
+#define CANFD_ID_MOTOR_DIAGNOSTIC             0x581U
 
 typedef enum
 {

@@ -434,6 +434,11 @@
               <FilePath>..\src\chassis_motion_controller.c</FilePath>
             </File>
             <File>
+              <FileName>chassis_heading_fusion.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\chassis_heading_fusion.c</FilePath>
+            </File>
+            <File>
               <FileName>bmi270_test.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\bmi270_test.c</FilePath>
