@@ -1,10 +1,10 @@
 /**
   *****************************************************************************
   * @file     pn532_uart5.c
-  * @brief    PN532 HSUЭ���AT32 USART5��ѯ����
+  * @brief    PN532 HSU协议和AT32 USART5轮询驱动
   *
-  * PN532ģ��̶���HSU����ģʽ������PB5ΪUSART5_RX��PB6ΪUSART5_TX��
-  * ��ǰ�汾���ڶ����������ԣ������ɰѵײ��շ��滻���жϻ�DMA���λ��塣
+  * PN532模块固定在HSU串口模式，主控PB5为USART5_RX，PB6为USART5_TX。
+  * 当前版本用于独立读卡测试，后续可把底层收发替换成中断或DMA环形缓冲。
   *****************************************************************************
   */
 
@@ -122,7 +122,7 @@ static pn532_result_t pn532_uart5_read_frame(uint8_t *data,
     return PN532_RESULT_TIMEOUT;
   }
 
-  /* PN532 ACK֡Ϊ00 FF 00��NACK֡ΪFF 00 00�� */
+  /* PN532 ACK帧为00 FF 00，NACK帧为FF 00 00。 */
   if((frame_length == 0U) && (length_checksum == 0xFFU))
   {
     if(pn532_uart5_receive_byte(&value, PN532_UART_BYTE_TIMEOUT_MS) == 0U)

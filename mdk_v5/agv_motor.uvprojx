@@ -7,7 +7,7 @@
 
   <Targets>
     <Target>
-      <TargetName>printf</TargetName>
+      <TargetName>agv_motor</TargetName>
       <ToolsetNumber>0x4</ToolsetNumber>
       <ToolsetName>ARM-ADS</ToolsetName>
       <pCCUsed>5060960::V5.06 update 7 (build 960)::.\ARMCC</pCCUsed>
@@ -48,7 +48,7 @@
             <InvalidFlash>0</InvalidFlash>
           </TargetStatus>
           <OutputDirectory>.\objects\</OutputDirectory>
-          <OutputName>printf</OutputName>
+          <OutputName>agv_motor</OutputName>
           <CreateExecutable>1</CreateExecutable>
           <CreateLib>0</CreateLib>
           <CreateHexFile>1</CreateHexFile>
@@ -381,7 +381,7 @@
       </TargetOption>
       <Groups>
         <Group>
-          <GroupName>user</GroupName>
+          <GroupName>production</GroupName>
           <Files>
             <File>
               <FileName>at32f45x_clock.c</FileName>
@@ -424,11 +424,6 @@
               <FilePath>..\src\serial_motion_protocol.c</FilePath>
             </File>
             <File>
-              <FileName>serial_command_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\serial_command_test.c</FilePath>
-            </File>
-            <File>
               <FileName>chassis_motion_controller.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\chassis_motion_controller.c</FilePath>
@@ -439,9 +434,9 @@
               <FilePath>..\src\chassis_heading_fusion.c</FilePath>
             </File>
             <File>
-              <FileName>bmi270_test.c</FileName>
+              <FileName>magnetic_follow_controller.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\src\bmi270_test.c</FilePath>
+              <FilePath>..\src\magnetic_follow_controller.c</FilePath>
             </File>
             <File>
               <FileName>imu_heading.c</FileName>
@@ -454,29 +449,9 @@
               <FilePath>..\src\motor_driver.c</FilePath>
             </File>
             <File>
-              <FileName>motor_driver_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motor_driver_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>motor_speed_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motor_speed_test.c</FilePath>
-            </File>
-            <File>
               <FileName>motor_pid.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\motor_pid.c</FilePath>
-            </File>
-            <File>
-              <FileName>motor_speed_pid_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motor_speed_pid_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>motor_open_loop_map_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motor_open_loop_map_test.c</FilePath>
             </File>
             <File>
               <FileName>motor_speed_control.c</FileName>
@@ -484,39 +459,9 @@
               <FilePath>..\src\motor_speed_control.c</FilePath>
             </File>
             <File>
-              <FileName>motor_speed_tuning_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motor_speed_tuning_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>chassis_motion_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\chassis_motion_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>chassis_straight_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\chassis_straight_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>motor_differential_load_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motor_differential_load_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>chassis_direction_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\chassis_direction_test.c</FilePath>
-            </File>
-            <File>
               <FileName>adc_monitor.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\adc_monitor.c</FilePath>
-            </File>
-            <File>
-              <FileName>adc_voltage_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\adc_voltage_test.c</FilePath>
             </File>
             <File>
               <FileName>motor_encoder.c</FileName>
@@ -524,54 +469,14 @@
               <FilePath>..\src\motor_encoder.c</FilePath>
             </File>
             <File>
-              <FileName>motor_encoder_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motor_encoder_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>left_motor_encoder_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\left_motor_encoder_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>dual_motor_encoder_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\dual_motor_encoder_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>left_motor_scope_forward_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\left_motor_scope_forward_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>right_motor_scope_forward_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\right_motor_scope_forward_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f456_replacement_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\at32f456_replacement_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>right_motor_encoder_adc_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\right_motor_encoder_adc_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>canfd_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\canfd_test.c</FilePath>
-            </File>
-            <File>
               <FileName>canfd_protocol.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\canfd_protocol.c</FilePath>
             </File>
             <File>
-              <FileName>canfd_bumper_test.c</FileName>
+              <FileName>canfd_status_codec.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\src\canfd_bumper_test.c</FilePath>
+              <FilePath>..\src\canfd_status_codec.c</FilePath>
             </File>
             <File>
               <FileName>motor_current.c</FileName>
@@ -584,9 +489,14 @@
               <FilePath>..\src\tof_i2c3.c</FilePath>
             </File>
             <File>
-              <FileName>tof_ir_test.c</FileName>
+              <FileName>dock_tof_sensor.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\src\tof_ir_test.c</FilePath>
+              <FilePath>..\src\dock_tof_sensor.c</FilePath>
+            </File>
+            <File>
+              <FileName>dock_ir_receiver.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\dock_ir_receiver.c</FilePath>
             </File>
             <File>
               <FileName>pn532_uart5.c</FileName>
@@ -599,11 +509,6 @@
               <FilePath>..\src\rfid_record.c</FilePath>
             </File>
             <File>
-              <FileName>rfid_reader_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\rfid_reader_test.c</FilePath>
-            </File>
-            <File>
               <FileName>bumper_input.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\bumper_input.c</FilePath>
@@ -612,11 +517,6 @@
               <FileName>bumper_safety.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\bumper_safety.c</FilePath>
-            </File>
-            <File>
-              <FileName>bumper_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\bumper_test.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -704,19 +604,9 @@
           <GroupName>firmware</GroupName>
           <Files>
             <File>
-              <FileName>at32f45x_acc.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_acc.c</FilePath>
-            </File>
-            <File>
               <FileName>at32f45x_adc.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\libraries\drivers\src\at32f45x_adc.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_aes.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_aes.c</FilePath>
             </File>
             <File>
               <FileName>at32f45x_can.c</FileName>
@@ -724,39 +614,9 @@
               <FilePath>..\libraries\drivers\src\at32f45x_can.c</FilePath>
             </File>
             <File>
-              <FileName>at32f45x_crc.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_crc.c</FilePath>
-            </File>
-            <File>
               <FileName>at32f45x_crm.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\libraries\drivers\src\at32f45x_crm.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_dac.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_dac.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_debug.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_debug.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_dma.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_dma.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_emac.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_emac.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_ertc.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_ertc.c</FilePath>
             </File>
             <File>
               <FileName>at32f45x_exint.c</FileName>
@@ -774,11 +634,6 @@
               <FilePath>..\libraries\drivers\src\at32f45x_gpio.c</FilePath>
             </File>
             <File>
-              <FileName>at32f45x_i2c.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_i2c.c</FilePath>
-            </File>
-            <File>
               <FileName>at32f45x_misc.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\libraries\drivers\src\at32f45x_misc.c</FilePath>
@@ -789,24 +644,9 @@
               <FilePath>..\libraries\drivers\src\at32f45x_pwc.c</FilePath>
             </File>
             <File>
-              <FileName>at32f45x_qspi.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_qspi.c</FilePath>
-            </File>
-            <File>
               <FileName>at32f45x_scfg.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\libraries\drivers\src\at32f45x_scfg.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_sdio.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_sdio.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_spi.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_spi.c</FilePath>
             </File>
             <File>
               <FileName>at32f45x_tmr.c</FileName>
@@ -814,34 +654,9 @@
               <FilePath>..\libraries\drivers\src\at32f45x_tmr.c</FilePath>
             </File>
             <File>
-              <FileName>at32f45x_trng.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_trng.c</FilePath>
-            </File>
-            <File>
               <FileName>at32f45x_usart.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\libraries\drivers\src\at32f45x_usart.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_usb.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_usb.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_wdt.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_wdt.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_wwdt.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_wwdt.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_xmc.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\libraries\drivers\src\at32f45x_xmc.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -864,9 +679,9 @@
           <GroupName>readme</GroupName>
           <Files>
             <File>
-              <FileName>readme.txt</FileName>
+              <FileName>README.md</FileName>
               <FileType>5</FileType>
-              <FilePath>..\readme.txt</FilePath>
+              <FilePath>..\README.md</FilePath>
             </File>
           </Files>
         </Group>

@@ -1,10 +1,10 @@
 /**
   *****************************************************************************
   * @file     motor_encoder.c
-  * @brief    Ë«Â·ÔöÁ¿Ê½Õý½»±àÂëÆ÷¼ÆÊý
+  * @brief    åŒè·¯å¢žé‡å¼æ­£äº¤ç¼–ç å™¨è®¡æ•°
   *
- * ×ó±àÂëÆ÷ A/B ÏàÁ¬½Ó PA6/PA7£¬ÓÒ±àÂëÆ÷ A/B ÏàÁ¬½Ó PC4/PC5¡£
-  * Ã¿¸öÐÅºÅµÄÉÏÉýÑØºÍÏÂ½µÑØ¶¼»á´¥·¢ÖÐ¶Ï£¬Òò´ËÒ»×éÍêÕû AB ÖÜÆÚµÃµ½ 4 ¸ö¼ÆÊý¡£
+ * å·¦ç¼–ç å™¨ A/B ç›¸è¿žæŽ¥ PA6/PA7ï¼Œå³ç¼–ç å™¨ A/B ç›¸è¿žæŽ¥ PC4/PC5ã€‚
+  * æ¯ä¸ªä¿¡å·çš„ä¸Šå‡æ²¿å’Œä¸‹é™æ²¿éƒ½ä¼šè§¦å‘ä¸­æ–­ï¼Œå› æ­¤ä¸€ç»„å®Œæ•´ AB å‘¨æœŸå¾—åˆ° 4 ä¸ªè®¡æ•°ã€‚
   *****************************************************************************
   */
 
@@ -17,9 +17,9 @@
 #include "at32f45x_misc.h"
 #include "at32f45x_scfg.h"
 
-/* ÈôÊµ³µÇ°½øÊ±Ä³Ò»²à¼ÆÊýÎª¸º£¬¿É°Ñ¶ÔÓ¦·½ÏòÐÞÕýÖµ¸ÄÎª -1¡£ */
+/* è‹¥å®žè½¦å‰è¿›æ—¶æŸä¸€ä¾§è®¡æ•°ä¸ºè´Ÿï¼Œå¯æŠŠå¯¹åº”æ–¹å‘ä¿®æ­£å€¼æ”¹ä¸º -1ã€‚ */
 #define MOTOR_LEFT_ENCODER_DIRECTION     1
-/* ÓÒµç»ú¾µÏñ°²×°£¬·´Ïàºó×óÓÒ±àÂëÆ÷Õý¼ÆÊý¶¼±íÊ¾Ð¡³µÏòÇ°¡£ */
+/* å³ç”µæœºé•œåƒå®‰è£…ï¼Œåç›¸åŽå·¦å³ç¼–ç å™¨æ­£è®¡æ•°éƒ½è¡¨ç¤ºå°è½¦å‘å‰ã€‚ */
 #define MOTOR_RIGHT_ENCODER_DIRECTION   -1
 
 static volatile int32_t left_encoder_count;
@@ -30,8 +30,8 @@ static uint8_t left_encoder_state;
 static uint8_t right_encoder_state;
 
 /*
- * Õý½»½âÂë²éÕÒ±í¡£Ë÷ÒýÓÉ¡°ÉÏ´Î AB ×´Ì¬ + µ±Ç° AB ×´Ì¬¡±×é³É¡£
- * ºÏ·¨ÏàÁÚ×´Ì¬²úÉú +1 »ò -1£¬Í¬Ê±±ä»¯µÈ·Ç·¨Ìø±ä¼ÇÎª 0£¬¿ÉÒÖÖÆ²¿·ÖÃ«´Ì¡£
+ * æ­£äº¤è§£ç æŸ¥æ‰¾è¡¨ã€‚ç´¢å¼•ç”±â€œä¸Šæ¬¡ AB çŠ¶æ€ + å½“å‰ AB çŠ¶æ€â€ç»„æˆã€‚
+ * åˆæ³•ç›¸é‚»çŠ¶æ€äº§ç”Ÿ +1 æˆ– -1ï¼ŒåŒæ—¶å˜åŒ–ç­‰éžæ³•è·³å˜è®°ä¸º 0ï¼Œå¯æŠ‘åˆ¶éƒ¨åˆ†æ¯›åˆºã€‚
  */
 static const int8_t quadrature_step_table[16] =
 {
@@ -78,7 +78,7 @@ void motor_encoder_init(void)
   crm_periph_clock_enable(CRM_GPIOC_PERIPH_CLOCK, TRUE);
   crm_periph_clock_enable(CRM_SCFG_PERIPH_CLOCK, TRUE);
 
-  /* µ±Ç°±àÂëÆ÷Îª5VÍÆÍìÊä³ö£¬GPIO²»ÆôÓÃÄÚ²¿ÉÏÀ­£¬±ÜÃâÏò3.3VµçÔ´»Ø¹à¡£ */
+  /* å½“å‰ç¼–ç å™¨ä¸º5VæŽ¨æŒ½è¾“å‡ºï¼ŒGPIOä¸å¯ç”¨å†…éƒ¨ä¸Šæ‹‰ï¼Œé¿å…å‘3.3Vç”µæºå›žçŒã€‚ */
   gpio_default_para_init(&gpio_init_struct);
   gpio_init_struct.gpio_mode = GPIO_MODE_INPUT;
   gpio_init_struct.gpio_pull = GPIO_PULL_NONE;
@@ -88,7 +88,7 @@ void motor_encoder_init(void)
   gpio_init_struct.gpio_pins = GPIO_PINS_6 | GPIO_PINS_7;
   gpio_init(GPIOA, &gpio_init_struct);
 
-  /* ÓÒ±àÂëÆ÷Ê¹ÓÃ PC4/PC5£¬×ó±àÂëÆ÷Ê¹ÓÃ PA6/PA7¡£ */
+  /* å³ç¼–ç å™¨ä½¿ç”¨ PC4/PC5ï¼Œå·¦ç¼–ç å™¨ä½¿ç”¨ PA6/PA7ã€‚ */
   scfg_exint_line_config(SCFG_PORT_SOURCE_GPIOC, SCFG_PINS_SOURCE4);
   scfg_exint_line_config(SCFG_PORT_SOURCE_GPIOC, SCFG_PINS_SOURCE5);
   scfg_exint_line_config(SCFG_PORT_SOURCE_GPIOA, SCFG_PINS_SOURCE6);

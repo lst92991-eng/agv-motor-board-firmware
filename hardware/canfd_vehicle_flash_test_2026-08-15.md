@@ -1,5 +1,9 @@
 # 电机板整车 CAN FD 对齐、ST-Link 烧录与静态验收记录
 
+> 历史验收记录：下文`printf.*`名称是2026-08-15当时的构建证据。当前生产工程已
+> 收口为`mdk_v5/agv_motor.uvprojx`，应使用`tools/build_motor_firmware.ps1`生成
+> `mdk_v5/objects/agv_motor.bin`，不要照抄下文旧产物路径。
+
 日期：2026-08-15
 
 对象：AT32F456RCT7 电机驱动板，正式底盘控制固件

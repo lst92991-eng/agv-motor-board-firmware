@@ -19,6 +19,7 @@
 #include "at32f45x_crm.h"
 #include "at32f45x_gpio.h"
 #include "at32f45x_misc.h"
+#include "canfd_status_codec.h"
 
 #define CANFD_BITTIME_DIV                         2U
 /* 192 MHz PCLK CAN clock: both phases sample at 75%; arbitration/data SJW
@@ -187,22 +188,12 @@ static void canfd_put_u16(uint8_t *data, uint16_t value)
   data[1] = (uint8_t)(value >> 8U);
 }
 
-static void canfd_put_i16(uint8_t *data, int16_t value)
-{
-  canfd_put_u16(data, (uint16_t)value);
-}
-
 static void canfd_put_u32(uint8_t *data, uint32_t value)
 {
   data[0] = (uint8_t)value;
   data[1] = (uint8_t)(value >> 8U);
   data[2] = (uint8_t)(value >> 16U);
   data[3] = (uint8_t)(value >> 24U);
-}
-
-static void canfd_put_i32(uint8_t *data, int32_t value)
-{
-  canfd_put_u32(data, (uint32_t)value);
 }
 
 static uint8_t canfd_tx_queue_push(canfd_tx_queue_t *queue,
@@ -541,6 +532,7 @@ static void canfd_parse_command(const canfd_frame_t *frame)
   uint8_t command_code;
   uint8_t session_required = 1U;
   int32_t arg1;
+  int32_t arg2;
   int32_t arg3;
 
   if(frame->data_size != 32U)
@@ -630,10 +622,11 @@ static void canfd_parse_command(const canfd_frame_t *frame)
   else if(command_code == CANFD_COMMAND_FOLLOW_MAG_START)
   {
     arg1 = canfd_get_i32(&frame->data[16]);
+    arg2 = canfd_get_i32(&frame->data[20]);
     arg3 = canfd_get_i32(&frame->data[24]);
     if((arg1 < -32768L) || (arg1 > 32767L) ||
+       (arg2 < 0L) || (arg2 > 1L) ||
        (arg3 < 0L) || (arg3 > 65535L) ||
-       (canfd_get_i32(&frame->data[20]) != 0L) ||
        (canfd_get_u32(&frame->data[28]) == 0UL) ||
        (canfd_get_u32(&frame->data[28]) > CANFD_TASK_TIMEOUT_MAX_MS))
     {
@@ -645,6 +638,7 @@ static void canfd_parse_command(const canfd_frame_t *frame)
     command.type = MOTION_CMD_FOLLOW_MAG;
     command.data.follow_mag.distance_mm = canfd_get_i32(&frame->data[12]);
     command.data.follow_mag.target_offset_x10mm = (int16_t)arg1;
+    command.data.follow_mag.allow_multi_peak = (uint8_t)arg2;
     command.data.follow_mag.speed_mm_s = (uint16_t)arg3;
     command.data.follow_mag.timeout_ms = canfd_get_u32(&frame->data[28]);
   }
@@ -1249,85 +1243,57 @@ void canfd_protocol_send_command_event(
 
 void canfd_protocol_send_drive_status(const canfd_drive_status_t *status)
 {
-  uint8_t data[32] = {0};
+  uint8_t data[CANFD_DRIVE_STATUS_PAYLOAD_SIZE];
 
-  if(status == NULL)
+  if(canfd_status_encode_drive(status, data, sizeof(data)) == 0U)
   {
     return;
   }
-  data[0] = status->application_state;
-  data[1] = status->motion_state;
-  data[2] = status->motion_mode;
-  data[3] = status->flags;
-  canfd_put_u32(&data[4], status->command_id);
-  canfd_put_u32(&data[8], status->session_id);
-  canfd_put_u32(&data[12], status->fault_mask);
-  canfd_put_u32(&data[16], status->warning_mask);
-  canfd_put_i32(&data[20], status->x_mm);
-  canfd_put_i32(&data[24], status->y_mm);
-  canfd_put_i32(&data[28], status->yaw_cdeg);
-  (void)canfd_queue_payload(CANFD_ID_CHASSIS_STATE, data, 32U, 0U);
+  (void)canfd_queue_payload(CANFD_ID_CHASSIS_STATE, data,
+                            CANFD_DRIVE_STATUS_PAYLOAD_SIZE, 0U);
 }
 
 void canfd_protocol_send_odom_status(const canfd_odom_status_t *status)
 {
-  uint8_t data[24] = {0};
+  uint8_t data[CANFD_ODOM_STATUS_PAYLOAD_SIZE];
 
   if(status == NULL)
   {
     return;
   }
-  canfd_put_u32(&data[0], status->uptime_ms);
-  canfd_put_u16(&data[4], ++canfd_status_sequence);
-  canfd_put_u16(&data[6], status->valid_flags);
-  canfd_put_i32(&data[8], status->x_mm);
-  canfd_put_i32(&data[12], status->y_mm);
-  canfd_put_i32(&data[16], status->yaw_cdeg);
-  canfd_put_i16(&data[20], status->linear_mm_s);
-  canfd_put_i16(&data[22], status->yaw_rate_cdeg_s);
-  (void)canfd_queue_payload(CANFD_ID_ODOM_STATUS, data, 24U, 0U);
+  if(canfd_status_encode_odom(status, ++canfd_status_sequence,
+                              data, sizeof(data)) == 0U)
+  {
+    return;
+  }
+  (void)canfd_queue_payload(CANFD_ID_ODOM_STATUS, data,
+                            CANFD_ODOM_STATUS_PAYLOAD_SIZE, 0U);
 }
 
 void canfd_protocol_send_motor_status(const canfd_motor_status_t *status)
 {
-  uint8_t data[32] = {0};
+  uint8_t data[CANFD_MOTOR_STATUS_PAYLOAD_SIZE];
 
-  if(status == NULL)
+  if(canfd_status_encode_motor(status, data, sizeof(data)) == 0U)
   {
     return;
   }
-  canfd_put_u32(&data[0], status->uptime_ms);
-  canfd_put_i16(&data[4], status->left_target_rpm_x100);
-  canfd_put_i16(&data[6], status->right_target_rpm_x100);
-  canfd_put_i16(&data[8], status->left_measured_rpm_x100);
-  canfd_put_i16(&data[10], status->right_measured_rpm_x100);
-  canfd_put_i16(&data[12], status->left_pwm);
-  canfd_put_i16(&data[14], status->right_pwm);
-  canfd_put_i32(&data[16], status->left_encoder_count);
-  canfd_put_i32(&data[20], status->right_encoder_count);
-  data[24] = status->left_invalid_count;
-  data[25] = status->right_invalid_count;
-  data[26] = status->state;
-  (void)canfd_queue_payload(CANFD_ID_MOTOR_DIAGNOSTIC, data, 32U, 0U);
+  (void)canfd_queue_payload(CANFD_ID_MOTOR_DIAGNOSTIC, data,
+                            CANFD_MOTOR_STATUS_PAYLOAD_SIZE, 0U);
 }
 
 void canfd_protocol_send_safety_status(
     const canfd_safety_status_t *status,
     uint8_t urgent)
 {
-  uint8_t data[16] = {0};
+  uint8_t data[CANFD_SAFETY_STATUS_PAYLOAD_SIZE];
 
-  if(status == NULL)
+  if(canfd_status_encode_safety(status, data, sizeof(data)) == 0U)
   {
     return;
   }
-  canfd_put_u32(&data[0], status->uptime_ms);
-  data[4] = status->bumper_mask;
-  data[5] = status->estop_source_mask;
-  data[6] = status->safety_state;
-  canfd_put_u32(&data[8], status->fault_mask);
-  canfd_put_u32(&data[12], status->warning_mask);
-  (void)canfd_queue_payload(CANFD_ID_SAFETY_STATUS, data, 16U, urgent);
+  (void)canfd_queue_payload(CANFD_ID_SAFETY_STATUS, data,
+                            CANFD_SAFETY_STATUS_PAYLOAD_SIZE, urgent);
 }
 
 uint16_t canfd_protocol_get_link_age_ms(uint32_t now_ms)

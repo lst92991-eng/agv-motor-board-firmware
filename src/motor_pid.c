@@ -1,7 +1,7 @@
 /**
   *****************************************************************************
   * @file     motor_pid.c
-  * @brief    µç»úËÙ¶È PID ¿ØÖÆÆ÷
+  * @brief    ç”µæœºé€Ÿåº¦ PID æ§åˆ¶å™¨
   *****************************************************************************
   */
 
@@ -58,7 +58,7 @@ float motor_pid_update(motor_pid_t *pid, float target, float measured, float dt_
   error = target - measured;
   candidate_integral = pid->integral + (error * dt_seconds);
 
-  /* ÏÈÏŞÖÆºòÑ¡»ı·ÖÏî£¬±ÜÃâÊä³ö±¥ºÍºó»ı·Ö¼ÌĞøÀÛ»ı¡£ */
+  /* å…ˆé™åˆ¶å€™é€‰ç§¯åˆ†é¡¹ï¼Œé¿å…è¾“å‡ºé¥±å’Œåç§¯åˆ†ç»§ç»­ç´¯ç§¯ã€‚ */
   if(pid->ki != 0.0f)
   {
     candidate_integral = motor_pid_limit(candidate_integral,
@@ -72,8 +72,8 @@ float motor_pid_update(motor_pid_t *pid, float target, float measured, float dt_
                      (pid->kd * derivative);
 
   /*
-   * Ö»ÓĞ¿ØÖÆÁ¿ÈÔ¿ÉÏòÎó²î·½ÏòÒÆ¶¯Ê±²Å½ÓÊÕĞÂ»ı·Ö¡£
-   * ÕâÄÜ±ÜÃâÆô¶¯ÖúÍÆ¡¢¶Â×ª»òÄ¿±ê³¬³öÄÜÁ¦Ê±µÄ»ı·Ö·çup¡£
+   * åªæœ‰æ§åˆ¶é‡ä»å¯å‘è¯¯å·®æ–¹å‘ç§»åŠ¨æ—¶æ‰æ¥æ”¶æ–°ç§¯åˆ†ã€‚
+   * è¿™èƒ½é¿å…å¯åŠ¨åŠ©æ¨ã€å µè½¬æˆ–ç›®æ ‡è¶…å‡ºèƒ½åŠ›æ—¶çš„ç§¯åˆ†é£upã€‚
    */
   if(!(((candidate_output > pid->output_max) && (error > 0.0f)) ||
        ((candidate_output < pid->output_min) && (error < 0.0f))))

@@ -161,7 +161,7 @@ ACK,65001,CLEAR_FAULT,ACCEPTED,0
 右轮反馈却达到约 `-36 RPM`，右侧 PWM 持续增加并最终触发运动故障 `0x0004`。
 用户现场确认右轮机械方向实际会使车辆向车头前进，因此不修改电机输出方向，
 仅将
-[`MOTOR_SPEED_RIGHT_FEEDBACK_SIGN`](../src/motor_speed_tuning.h)
+[`MOTOR_SPEED_RIGHT_FEEDBACK_SIGN`](../src/motor_speed_calibration.h)
 从 `+1.0f` 改为 `-1.0f`。
 
 修复后的构建和烧录结果：
@@ -232,7 +232,7 @@ STOP，任务正常取消，未再触发 `MOTION_ERROR`。
 - 电机方向与反馈：[`motor_driver.c`](../src/motor_driver.c)、
   [`motor_encoder.c`](../src/motor_encoder.c)、
   [`motor_speed_control.c`](../src/motor_speed_control.c)、
-  [`motor_speed_tuning.h`](../src/motor_speed_tuning.h)。
+  [`motor_speed_calibration.h`](../src/motor_speed_calibration.h)。
 - 防撞输入和安全锁存：[`bumper_input.c`](../src/bumper_input.c)、
   [`bumper_safety.c`](../src/bumper_safety.c)、
   [`chassis_motion_controller.c`](../src/chassis_motion_controller.c)。

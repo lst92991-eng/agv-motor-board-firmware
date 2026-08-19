@@ -7,14 +7,14 @@
 extern "C" {
 #endif
 
-/* ³õÊ¼»¯´®¿ÚÔË¶¯Ğ­Òé£¬²¢×¢²áÍ³Ò»ÔË¶¯ÃüÁî´¦ÀíÆ÷¡£ */
+/* åˆå§‹åŒ–ä¸²å£è¿åŠ¨åè®®ï¼Œå¹¶æ³¨å†Œç»Ÿä¸€è¿åŠ¨å‘½ä»¤å¤„ç†å™¨ã€‚ */
 void serial_motion_protocol_init(motion_command_handler_t handler,
                                  void *context);
 
-/* ·Ç×èÈû´¦Àí½ÓÊÕ»º³åÇøÖĞµÄËùÓĞÍêÕûÃüÁîĞĞ¡£ */
+/* éé˜»å¡å¤„ç†æ¥æ”¶ç¼“å†²åŒºä¸­çš„æ‰€æœ‰å®Œæ•´å‘½ä»¤è¡Œã€‚ */
 void serial_motion_protocol_poll(void);
 
-/* ÓÉ¿ØÖÆÈÎÎñÔÚÕæÕı´¦Àí¶ÓÁĞÃüÁîºó·¢ËÍ×îÖÕ½ÓÊÜ»ò¾Ü¾ø½á¹û¡£ */
+/* ç”±æ§åˆ¶ä»»åŠ¡åœ¨çœŸæ­£å¤„ç†é˜Ÿåˆ—å‘½ä»¤åå‘é€æœ€ç»ˆæ¥å—æˆ–æ‹’ç»ç»“æœã€‚ */
 void serial_motion_protocol_send_result(
     const motion_command_t *command,
     motion_command_handle_result_t result);

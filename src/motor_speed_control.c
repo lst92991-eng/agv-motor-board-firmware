@@ -1,10 +1,9 @@
 /**
   *****************************************************************************
   * @file     motor_speed_control.c
-  * @brief    ¿É¸´ÓÃµÄË«Â·µç»ú±Õ»·ËÙ¶È¿ØÖÆ
+  * @brief    å¯å¤ç”¨çš„åŒè·¯ç”µæœºé—­çŽ¯é€Ÿåº¦æŽ§åˆ¶
   *
- * ¿ØÖÆ²ÎÊý¼¯ÖÐÔÚ motor_speed_tuning.h£¬±ÜÃâÁ¿²ú¿ØÖÆºÍ¶ÀÁ¢ PID ²âÊÔ
- * Ê¹ÓÃ²»Ò»ÖÂµÄÇ°À¡¡¢²ÉÑùÖÜÆÚ»ò PID ²ÎÊý¡£
+ * æŽ§åˆ¶å‚æ•°é›†ä¸­åœ¨ motor_speed_calibration.hï¼Œé¿å…é‡äº§æŽ§åˆ¶å‡ºçŽ°å¤šå¥—å‚æ•°ã€‚
   *****************************************************************************
   */
 
@@ -15,7 +14,7 @@
 #include "at32f45x_board.h"
 #include "motor_encoder.h"
 #include "motor_pid.h"
-#include "motor_speed_tuning.h"
+#include "motor_speed_calibration.h"
 
 typedef struct
 {
@@ -104,9 +103,9 @@ static int16_t motor_speed_axis_update_command(motor_speed_axis_t *axis)
   }
 
   /*
-   * ÖØÔØÆô¶¯Ê±ÏÈÓÃ½Ï¸ßPWM¿Ë·þ¾²Ä¦²ÁºÍÍòÏòÂÖ°ÚÕý×èÁ¦¡£
-   * ÖÁÉÙ±£³Ö100ms£¬±àÂëÆ÷Í¬Ïò´ïµ½5RPM²¢Á¬ÐøÎÈ¶¨40msºóÍË³ö£¬
-   * ×î³¤²»³¬¹ý400ms£¬¼æ¹Ë´øÔØÆð²½Óë¼Ü¿Õ²âÊÔµÄ³¬µ÷ÏÞÖÆ¡£
+   * é‡è½½å¯åŠ¨æ—¶å…ˆç”¨è¾ƒé«˜PWMå…‹æœé™æ‘©æ“¦å’Œä¸‡å‘è½®æ‘†æ­£é˜»åŠ›ã€‚
+   * è‡³å°‘ä¿æŒ100msï¼Œç¼–ç å™¨åŒå‘è¾¾åˆ°5RPMå¹¶è¿žç»­ç¨³å®š40msåŽé€€å‡ºï¼Œ
+   * æœ€é•¿ä¸è¶…è¿‡400msï¼Œå…¼é¡¾å¸¦è½½èµ·æ­¥ä¸Žæž¶ç©ºæµ‹è¯•çš„è¶…è°ƒé™åˆ¶ã€‚
    */
   if(axis->startup_boost_cycles != 0U)
   {
@@ -161,7 +160,7 @@ static int16_t motor_speed_axis_update_command(motor_speed_axis_t *axis)
 
   feed_forward = motor_speed_feed_forward(axis->target_rpm);
 
-  /* Æô¶¯Ð±ÆÂ´ïµ½Ç°À¡ÖµÖ®Ç°¶³½á»ý·Ö£¬·ÀÖ¹Æô¶¯½×¶Î»ý·Ö±¥ºÍ¡£ */
+  /* å¯åŠ¨æ–œå¡è¾¾åˆ°å‰é¦ˆå€¼ä¹‹å‰å†»ç»“ç§¯åˆ†ï¼Œé˜²æ­¢å¯åŠ¨é˜¶æ®µç§¯åˆ†é¥±å’Œã€‚ */
   if(axis->pid_active == 0U)
   {
     correction = 0.0f;
@@ -294,7 +293,7 @@ void motor_speed_control_update_now(void)
     float feedback_sign;
 
     axis->last_count = current_count;
-    /* ×óÓÒ±àÂëÆ÷°²×°·½Ïò²»Í¬£¬Êµ³µÇ°½øÊ±±ØÐë·Ö±ðÐÞÕý·´À¡·ûºÅ¡£ */
+    /* å·¦å³ç¼–ç å™¨å®‰è£…æ–¹å‘ä¸åŒï¼Œå®žè½¦å‰è¿›æ—¶å¿…é¡»åˆ†åˆ«ä¿®æ­£åé¦ˆç¬¦å·ã€‚ */
     feedback_sign = (motor_index == MOTOR_LEFT) ?
                     MOTOR_SPEED_LEFT_FEEDBACK_SIGN :
                     MOTOR_SPEED_RIGHT_FEEDBACK_SIGN;

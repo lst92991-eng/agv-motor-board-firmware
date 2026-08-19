@@ -14,7 +14,7 @@
 #define MOTION_GOTO_SPEED_MIN_MM_S              10U
 #define MOTION_GOTO_SPEED_MAX_MM_S            1000U
 #define MOTION_FOLLOW_MAG_DISTANCE_MIN_MM       300L
-#define MOTION_FOLLOW_MAG_DISTANCE_MAX_MM      3000L
+#define MOTION_FOLLOW_MAG_DISTANCE_MAX_MM      6000L
 #define MOTION_FOLLOW_MAG_OFFSET_LIMIT_X10MM    100L
 #define MOTION_FOLLOW_MAG_SPEED_MIN_MM_S          50U
 #define MOTION_FOLLOW_MAG_SPEED_MAX_MM_S         330U
@@ -69,6 +69,7 @@ motion_command_error_t motion_command_validate(const motion_command_t *command)
         -MOTION_FOLLOW_MAG_OFFSET_LIMIT_X10MM) ||
        (follow->target_offset_x10mm >
         MOTION_FOLLOW_MAG_OFFSET_LIMIT_X10MM) ||
+       (follow->allow_multi_peak > 1U) ||
        (follow->speed_mm_s < MOTION_FOLLOW_MAG_SPEED_MIN_MM_S) ||
        (follow->speed_mm_s > MOTION_FOLLOW_MAG_SPEED_MAX_MM_S) ||
        (follow->timeout_ms == 0UL) ||

@@ -1,5 +1,8 @@
 # 电机板 CAN FD 4 Mbit/s 烧录与整车静态验证
 
+> 历史验收记录：下文`printf.*`名称是当时构建证据。当前生产工程已改为
+> `mdk_v5/agv_motor.uvprojx`，标准构建入口为`tools/build_motor_firmware.ps1`。
+
 日期：2026-08-15
 
 安全边界：本轮只接收周期 PDO，没有发送 `CLAIM_CONTROL`、

@@ -16,7 +16,7 @@ typedef struct
   float output_max;
 } motor_pid_t;
 
-/* ³õÊ¼»¯ PID ²ÎÊı¡¢»ı·ÖÏîºÍÉÏÒ»´ÎÎó²î¡£ */
+/* åˆå§‹åŒ– PID å‚æ•°ã€ç§¯åˆ†é¡¹å’Œä¸Šä¸€æ¬¡è¯¯å·®ã€‚ */
 void motor_pid_init(motor_pid_t *pid,
                     float kp,
                     float ki,
@@ -24,10 +24,10 @@ void motor_pid_init(motor_pid_t *pid,
                     float output_min,
                     float output_max);
 
-/* Çå³ı»ı·ÖÏîºÍÎ¢·Ö»·½ÚµÄÀúÊ·Îó²î¡£ */
+/* æ¸…é™¤ç§¯åˆ†é¡¹å’Œå¾®åˆ†ç¯èŠ‚çš„å†å²è¯¯å·®ã€‚ */
 void motor_pid_reset(motor_pid_t *pid);
 
-/* ¸ù¾İÄ¿±êÖµ¡¢·´À¡ÖµºÍ²ÉÑùÖÜÆÚ¼ÆËã PID Êä³ö¡£ */
+/* æ ¹æ®ç›®æ ‡å€¼ã€åé¦ˆå€¼å’Œé‡‡æ ·å‘¨æœŸè®¡ç®— PID è¾“å‡ºã€‚ */
 float motor_pid_update(motor_pid_t *pid, float target, float measured, float dt_seconds);
 
 #ifdef __cplusplus

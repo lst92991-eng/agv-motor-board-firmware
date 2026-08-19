@@ -10,24 +10,24 @@ extern "C" {
 #endif
 
 /*
- * ��ʼ�����ҵ���� AB ����������롣
- * �������ʹ�� PA6/PA7���ұ�����ʹ�� PC4/PC5����·�źž�����˫�����жϼ�����
+ * 初始化左右电机的 AB 相编码器输入。
+ * 左编码器使用 PA6/PA7，右编码器使用 PC4/PC5，四路信号均采用双边沿中断计数。
  */
 void motor_encoder_init(void);
 
-/* ��ȡָ��������ϴ����㿪ʼ�ۼƵ���������ֵ�� */
+/* 读取指定电机从上次清零开始累计的正交计数值。 */
 int32_t motor_encoder_get_count(motor_id_t motor);
 
-/* ��ȡAB��ͬʱ����ȷǷ�״̬ת�����ۼƴ����� */
+/* 读取AB相同时跳变等非法状态转换的累计次数。 */
 uint32_t motor_encoder_get_invalid_transition_count(motor_id_t motor);
 
-/* ����ָ��������ۼƼ���ֵ�� */
+/* 清零指定电机的累计计数值。 */
 void motor_encoder_reset(motor_id_t motor);
 
-/* ͬʱ�������ҵ���ۼƼ���ֵ�� */
+/* 同时清零左右电机累计计数值。 */
 void motor_encoder_reset_all(void);
 
-/* ���º������ⲿ�жϷ��������ã�Ӧ�ò㲻��Ҫֱ�ӵ��á� */
+/* 以下函数由外部中断服务程序调用，应用层不需要直接调用。 */
 void motor_encoder_left_edge_handler(void);
 void motor_encoder_right_edge_handler(void);
 

@@ -69,6 +69,7 @@ typedef struct
 {
   int32_t distance_mm;
   int16_t target_offset_x10mm;
+  uint8_t allow_multi_peak;
   uint16_t speed_mm_s;
   uint32_t timeout_ms;
 } motion_follow_mag_data_t;

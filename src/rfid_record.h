@@ -18,10 +18,10 @@ typedef struct
   uint16_t sequence;
 } rfid_record_t;
 
-/* Ğ£Ñé²¢½âÎöMIFAREÊı¾İ¿éÖĞµÄAGV¼ÇÂ¼¡£ */
+/* æ ¡éªŒå¹¶è§£æMIFAREæ•°æ®å—ä¸­çš„AGVè®°å½•ã€‚ */
 uint8_t rfid_record_decode(const uint8_t *data, rfid_record_t *record);
 
-/* ¼ÆËãAGV¼ÇÂ¼Ê¹ÓÃµÄCRC16-CCITT-FALSE¡£ */
+/* è®¡ç®—AGVè®°å½•ä½¿ç”¨çš„CRC16-CCITT-FALSEã€‚ */
 uint16_t rfid_record_crc16(const uint8_t *data, uint16_t length);
 
 #ifdef __cplusplus

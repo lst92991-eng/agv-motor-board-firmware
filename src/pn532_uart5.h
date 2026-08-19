@@ -30,24 +30,24 @@ typedef enum
   PN532_RESULT_ARGUMENT = -6
 } pn532_result_t;
 
-/* ³õÊ¼»¯PB5/PB6ÉÏµÄUSART5²¢»½ĞÑPN532¡£ */
+/* åˆå§‹åŒ–PB5/PB6ä¸Šçš„USART5å¹¶å”¤é†’PN532ã€‚ */
 pn532_result_t pn532_uart5_init(uint8_t *ic,
                                 uint8_t *version,
                                 uint8_t *revision,
                                 uint8_t *support);
 
-/* ÖØĞÂ·¢ËÍ»½ĞÑºÍSAMÅäÖÃÃüÁî¡£ */
+/* é‡æ–°å‘é€å”¤é†’å’ŒSAMé…ç½®å‘½ä»¤ã€‚ */
 pn532_result_t pn532_uart5_reinitialize(void);
 
-/* ËÑË÷Ò»¸öISO14443-A±êÇ©¡£ */
+/* æœç´¢ä¸€ä¸ªISO14443-Aæ ‡ç­¾ã€‚ */
 pn532_result_t pn532_list_passive_target(pn532_target_t *target);
 
-/* Ê¹ÓÃKey AÈÏÖ¤MIFARE ClassicÊı¾İ¿é¡£ */
+/* ä½¿ç”¨Key Aè®¤è¯MIFARE Classicæ•°æ®å—ã€‚ */
 pn532_result_t pn532_mifare_authenticate(const pn532_target_t *target,
                                          uint8_t block,
                                          const uint8_t key_a[6]);
 
-/* ¶ÁÈ¡Ò»¸öMIFARE ClassicÊı¾İ¿é¡£ */
+/* è¯»å–ä¸€ä¸ªMIFARE Classicæ•°æ®å—ã€‚ */
 pn532_result_t pn532_mifare_read_block(const pn532_target_t *target,
                                        uint8_t block,
                                        const uint8_t key_a[6],

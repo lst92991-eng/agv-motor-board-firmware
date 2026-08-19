@@ -80,7 +80,7 @@ PC 端 C++ Supervisor。
   - 编码器角速度异常样本会被拒绝并计数。
 - `canfd_protocol.c/.h`
   - 新增 `0x581` 电机诊断帧，包含目标/实测转速、PWM、归一化编码器和状态。
-- `motor_speed_tuning.h`
+- `motor_speed_calibration.h`
   - 静态前馈 PWM 从 50 提高到 100，解决落地负载下启动助推退出后单轮停转。
 - `at32f456_stlink_program.ps1`
   - FLM 装载前增加 `reset halt`，减少运行态外设影响烧录算法。

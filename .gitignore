@@ -1,20 +1,30 @@
-# ±¾µØ±à¼­Æ÷Óë´úÀíÅäÖÃ
+# æœ¬åœ°ç¼–è¾‘å™¨ä¸ä»£ç†é…ç½®
 .vscode/
 .agents/
 .claude/
 .codex/
 
-# KeilÉú³ÉÎÄ¼ş
+# Keilç”Ÿæˆæ–‡ä»¶
 mdk_v5/objects/
 mdk_v5/listings/
 mdk_v5/*.uvguix.*
 mdk_v5/*.uvoptx
 mdk_v5/*.log
+*.axf
+*.bin
+*.hex
+*.map
+*.o
+*.obj
+*.crf
+*.d
+*.lnp
+*.pack
 
-# Í¨ÓÃ¹¹½¨ÓëÁÙÊ±Ä¿Â¼
+# é€šç”¨æ„å»ºä¸ä¸´æ—¶ç›®å½•
 build/
 tmp/
 
-# Python»º´æ
+# Pythonç¼“å­˜
 __pycache__/
 *.pyc

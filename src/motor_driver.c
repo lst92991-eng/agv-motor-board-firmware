@@ -1,13 +1,13 @@
 /**
   *****************************************************************************
   * @file     motor_driver.c
-  * @brief    Ë«Â· AT8236 Ö±Á÷µç»úÇı¶¯
+  * @brief    åŒè·¯ AT8236 ç›´æµç”µæœºé©±åŠ¨
   *
-  * Ó²¼şÁ¬½Ó£º
- * ×óµç»ú£ºPC6 -> L_IN1 -> AT8236(U1) IN1£¬PC7 -> L_IN2 -> IN2£»
- * ÓÒµç»ú£ºPC8 -> R_IN1 -> AT8236(U3) IN1£¬PC9 -> R_IN2 -> IN2¡£
- * VREF ÓÉ°åÉÏ 10k/1.8k ·ÖÑ¹¹Ì¶¨£¬²»ÓÉ MCU Êä³ö¿ØÖÆ¡£
-  * ËÄ¸öÒı½ÅÊ¹ÓÃ TMR8 µÄËÄ¸ö PWM Í¨µÀ£¬¸´ÓÃ¹¦ÄÜÎª GPIO_MUX_3¡£
+  * ç¡¬ä»¶è¿æ¥ï¼š
+ * å·¦ç”µæœºï¼šPC6 -> L_IN1 -> AT8236(U1) IN1ï¼ŒPC7 -> L_IN2 -> IN2ï¼›
+ * å³ç”µæœºï¼šPC8 -> R_IN1 -> AT8236(U3) IN1ï¼ŒPC9 -> R_IN2 -> IN2ã€‚
+ * VREF ç”±æ¿ä¸Š 10k/1.8k åˆ†å‹å›ºå®šï¼Œä¸ç”± MCU è¾“å‡ºæ§åˆ¶ã€‚
+  * å››ä¸ªå¼•è„šä½¿ç”¨ TMR8 çš„å››ä¸ª PWM é€šé“ï¼Œå¤ç”¨åŠŸèƒ½ä¸º GPIO_MUX_3ã€‚
   *****************************************************************************
   */
 
@@ -18,7 +18,7 @@
 #include "at32f45x_gpio.h"
 #include "at32f45x_tmr.h"
 
-/* 20kHz ¸ßÓÚ³£¼û¿ÉÌıÆµÂÊ£¬µç»úµÍËÙÔËĞĞÊ±²»»á³öÏÖÃ÷ÏÔ PWM Ğ¥½Ğ¡£ */
+/* 20kHz é«˜äºå¸¸è§å¯å¬é¢‘ç‡ï¼Œç”µæœºä½é€Ÿè¿è¡Œæ—¶ä¸ä¼šå‡ºç°æ˜æ˜¾ PWM å•¸å«ã€‚ */
 #define MOTOR_PWM_FREQUENCY_HZ          20000UL
 #define MOTOR_SPEED_MAX_PERMILLE        1000
 #define MOTOR_LEFT_OUTPUT_DIRECTION         1
@@ -26,7 +26,7 @@
 
 static uint32_t motor_pwm_period;
 
-/* ½«µç»úÊäÈë¶ËÓ³Éäµ½ TMR8 µÄËÄ¸öÊä³ö±È½ÏÍ¨µÀ¡£ */
+/* å°†ç”µæœºè¾“å…¥ç«¯æ˜ å°„åˆ° TMR8 çš„å››ä¸ªè¾“å‡ºæ¯”è¾ƒé€šé“ã€‚ */
 static tmr_channel_select_type motor_in1_channel(motor_id_t motor)
 {
   return (motor == MOTOR_LEFT) ? TMR_SELECT_CHANNEL_1 : TMR_SELECT_CHANNEL_3;
@@ -37,7 +37,7 @@ static tmr_channel_select_type motor_in2_channel(motor_id_t motor)
   return (motor == MOTOR_LEFT) ? TMR_SELECT_CHANNEL_2 : TMR_SELECT_CHANNEL_4;
 }
 
-/* Ğ´Èëµ¥¸ö PWM Í¨µÀ£¬Õ¼¿Õ±È²ÎÊıÊ¹ÓÃ 0~1000 µÄÇ§·Ö±È¡£ */
+/* å†™å…¥å•ä¸ª PWM é€šé“ï¼Œå ç©ºæ¯”å‚æ•°ä½¿ç”¨ 0~1000 çš„åƒåˆ†æ¯”ã€‚ */
 static void motor_pwm_set(tmr_channel_select_type channel, uint16_t duty_permille)
 {
   uint32_t compare_value;
@@ -60,7 +60,7 @@ void motor_driver_init(void)
   crm_periph_clock_enable(CRM_GPIOC_PERIPH_CLOCK, TRUE);
   crm_periph_clock_enable(CRM_TMR8_PERIPH_CLOCK, TRUE);
 
-  /* PC6~PC9 ·Ö±ğ¶ÔÓ¦ TMR8_CH1~CH4¡£ */
+  /* PC6~PC9 åˆ†åˆ«å¯¹åº” TMR8_CH1~CH4ã€‚ */
   gpio_default_para_init(&gpio_init_struct);
   gpio_init_struct.gpio_pins = GPIO_PINS_6 | GPIO_PINS_7 | GPIO_PINS_8 | GPIO_PINS_9;
   gpio_init_struct.gpio_mode = GPIO_MODE_MUX;
@@ -98,7 +98,7 @@ void motor_driver_init(void)
   tmr_output_channel_buffer_enable(TMR8, TMR_SELECT_CHANNEL_4, TRUE);
   tmr_period_buffer_enable(TMR8, TRUE);
 
-  /* ÏÈ°Ñ±È½ÏÖµÇåÁã£¬ÔÙ¿ªÆô¸ß¼¶¶¨Ê±Æ÷Ö÷Êä³ö£¬·ÀÖ¹³õÊ¼»¯Ë²¼äÎó×ª¡£ */
+  /* å…ˆæŠŠæ¯”è¾ƒå€¼æ¸…é›¶ï¼Œå†å¼€å¯é«˜çº§å®šæ—¶å™¨ä¸»è¾“å‡ºï¼Œé˜²æ­¢åˆå§‹åŒ–ç¬é—´è¯¯è½¬ã€‚ */
   motor_driver_stop_all(MOTOR_STOP_COAST);
   tmr_output_enable(TMR8, TRUE);
   tmr_counter_enable(TMR8, TRUE);
@@ -124,7 +124,7 @@ void motor_driver_set_speed(motor_id_t motor, int16_t speed_permille)
     speed_permille = -MOTOR_SPEED_MAX_PERMILLE;
   }
 
-  /* ÓÒµç»ú¾µÏñ°²×°£¬Í³Ò»²¹³¥ºó£¬ÕıÖµÊ¼ÖÕ±íÊ¾³µÂÖÍÆ¶¯Ğ¡³µÏòÇ°¡£ */
+  /* å³ç”µæœºé•œåƒå®‰è£…ï¼Œç»Ÿä¸€è¡¥å¿åï¼Œæ­£å€¼å§‹ç»ˆè¡¨ç¤ºè½¦è½®æ¨åŠ¨å°è½¦å‘å‰ã€‚ */
   output_direction = (motor == MOTOR_LEFT) ? MOTOR_LEFT_OUTPUT_DIRECTION :
                                              MOTOR_RIGHT_OUTPUT_DIRECTION;
   speed_permille = (int16_t)(speed_permille * output_direction);
@@ -135,8 +135,8 @@ void motor_driver_set_speed(motor_id_t motor, int16_t speed_permille)
     decay_duty_permille = MOTOR_SPEED_MAX_PERMILLE - duty_permille;
 
     /*
-     * AT8236 Õı×ªÂıË¥¼õÄ£Ê½£ºIN1=1£¬IN2=PWM¡£
-     * IN2 µÄ¸ßµçÆ½½×¶ÎÎªÉ²³µ£¬µÍµçÆ½½×¶ÎÎªÕıÏòÇı¶¯£¬Òò´ËĞ´Èë 1-duty¡£
+     * AT8236 æ­£è½¬æ…¢è¡°å‡æ¨¡å¼ï¼šIN1=1ï¼ŒIN2=PWMã€‚
+     * IN2 çš„é«˜ç”µå¹³é˜¶æ®µä¸ºåˆ¹è½¦ï¼Œä½ç”µå¹³é˜¶æ®µä¸ºæ­£å‘é©±åŠ¨ï¼Œå› æ­¤å†™å…¥ 1-dutyã€‚
      */
     motor_pwm_set(motor_in1_channel(motor), MOTOR_SPEED_MAX_PERMILLE);
     motor_pwm_set(motor_in2_channel(motor), decay_duty_permille);
@@ -146,7 +146,7 @@ void motor_driver_set_speed(motor_id_t motor, int16_t speed_permille)
     duty_permille = (uint16_t)(-speed_permille);
     decay_duty_permille = MOTOR_SPEED_MAX_PERMILLE - duty_permille;
 
-    /* AT8236 ·´×ªÂıË¥¼õÄ£Ê½£ºIN1=PWM£¬IN2=1¡£ */
+    /* AT8236 åè½¬æ…¢è¡°å‡æ¨¡å¼ï¼šIN1=PWMï¼ŒIN2=1ã€‚ */
     motor_pwm_set(motor_in1_channel(motor), decay_duty_permille);
     motor_pwm_set(motor_in2_channel(motor), MOTOR_SPEED_MAX_PERMILLE);
   }
@@ -171,7 +171,7 @@ void motor_driver_stop(motor_id_t motor, motor_stop_mode_t stop_mode)
     return;
   }
 
-  /* AT8236 Á½¸öÊäÈë¶¼ÎªµÍÊ±»¬ĞĞ£¬¶¼Îª¸ßÊ±½øĞĞ¶ÌÉ²¡£ */
+  /* AT8236 ä¸¤ä¸ªè¾“å…¥éƒ½ä¸ºä½æ—¶æ»‘è¡Œï¼Œéƒ½ä¸ºé«˜æ—¶è¿›è¡ŒçŸ­åˆ¹ã€‚ */
   duty_permille = (stop_mode == MOTOR_STOP_BRAKE) ? MOTOR_SPEED_MAX_PERMILLE : 0U;
   motor_pwm_set(motor_in1_channel(motor), duty_permille);
   motor_pwm_set(motor_in2_channel(motor), duty_permille);
