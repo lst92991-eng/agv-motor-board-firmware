@@ -14,6 +14,7 @@ extern "C" {
 #define CANFD_ODOM_STATUS_PAYLOAD_SIZE        24U
 #define CANFD_MOTOR_STATUS_PAYLOAD_SIZE       32U
 #define CANFD_SAFETY_STATUS_PAYLOAD_SIZE      16U
+#define CANFD_DOCK_STATUS_PAYLOAD_SIZE        32U
 
 uint8_t canfd_status_encode_drive(
     const canfd_drive_status_t *status,
@@ -33,6 +34,11 @@ uint8_t canfd_status_encode_motor(
 
 uint8_t canfd_status_encode_safety(
     const canfd_safety_status_t *status,
+    uint8_t *payload,
+    size_t capacity);
+
+uint8_t canfd_status_encode_dock(
+    const canfd_dock_status_t *status,
     uint8_t *payload,
     size_t capacity);
 

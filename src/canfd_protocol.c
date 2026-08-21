@@ -1282,6 +1282,18 @@ void canfd_protocol_send_motor_status(const canfd_motor_status_t *status)
                             CANFD_MOTOR_STATUS_PAYLOAD_SIZE, 0U);
 }
 
+void canfd_protocol_send_dock_status(const canfd_dock_status_t *status)
+{
+  uint8_t data[CANFD_DOCK_STATUS_PAYLOAD_SIZE];
+
+  if(canfd_status_encode_dock(status, data, sizeof(data)) == 0U)
+  {
+    return;
+  }
+  (void)canfd_queue_payload(CANFD_ID_DOCK_STATUS, data,
+                            CANFD_DOCK_STATUS_PAYLOAD_SIZE, 0U);
+}
+
 void canfd_protocol_send_safety_status(
     const canfd_safety_status_t *status,
     uint8_t urgent)

@@ -42,12 +42,14 @@ static magnetic_follow_sample_t make_trackable_sample(void)
 static void update_sample(magnetic_follow_controller_t *controller,
                           magnetic_follow_sample_t *sample,
                           int16_t offset_x10mm,
-                          float requested_run_rpm)
+                          float requested_run_rpm,
+                          float actual_yaw_rate_dps)
 {
   sample->sequence++;
   sample->receive_time_ms += 10UL;
   sample->offset_x10mm = offset_x10mm;
-  magnetic_follow_controller_update(controller, sample, requested_run_rpm);
+  magnetic_follow_controller_update(controller, sample, requested_run_rpm,
+                                    actual_yaw_rate_dps);
 }
 
 static void test_trackability(void)
@@ -85,7 +87,7 @@ static void test_control_direction_and_limits(void)
   magnetic_follow_controller_start(&controller, 0, 0, &sample, 70.0f);
   sample.sequence++;
   sample.receive_time_ms += 10UL;
-  magnetic_follow_controller_update(&controller, &sample, 70.0f);
+  magnetic_follow_controller_update(&controller, &sample, 70.0f, 0.0f);
 
   expect_true(controller.yaw_rate_target_dps > 0.0f,
               "positive offset commands positive yaw rate");
@@ -128,7 +130,7 @@ static void test_curve_response_and_low_speed_limit(void)
   sample.sequence++;
   sample.receive_time_ms += 10UL;
   sample.offset_x10mm = 60;
-  magnetic_follow_controller_update(&controller, &sample, 11.23f);
+  magnetic_follow_controller_update(&controller, &sample, 11.23f, 0.0f);
   expect_true(fabsf(controller.yaw_rate_target_dps - 12.0f) < 0.001f,
               "growing 6mm curve error reaches the 12dps turn limit");
   expect_true(controller.speed_limit_rpm <= 8.76f,
@@ -137,7 +139,7 @@ static void test_curve_response_and_low_speed_limit(void)
   sample.sequence++;
   sample.receive_time_ms += 10UL;
   sample.offset_x10mm = 55;
-  magnetic_follow_controller_update(&controller, &sample, 11.23f);
+  magnetic_follow_controller_update(&controller, &sample, 11.23f, 0.0f);
   expect_true(controller.yaw_rate_target_dps > 0.0f,
               "falling error cannot reverse a still-positive curve turn");
 
@@ -175,7 +177,7 @@ static void test_curve_mode_uses_global_offset(void)
   magnetic_follow_controller_start(&controller, 0, 1U, &sample, 70.0f);
   sample.sequence++;
   sample.receive_time_ms += 10UL;
-  magnetic_follow_controller_update(&controller, &sample, 70.0f);
+  magnetic_follow_controller_update(&controller, &sample, 70.0f, 0.0f);
   expect_true((controller.yaw_rate_target_dps < 0.0f) &&
               (controller.yaw_rate_target_dps > -5.0f),
               "global -3.3mm centroid commands only a small right correction");
@@ -192,42 +194,57 @@ static void test_adaptive_high_speed_curve_phases(void)
   expect_true(controller.adaptive_high_speed != 0U,
               "330mmps request enables adaptive high-speed scheduling");
   expect_true(controller.speed_phase ==
+              MAGNETIC_FOLLOW_SPEED_CURVE_TRACK,
+              "adaptive task starts in low-speed capture phase");
+  expect_true(fabsf(controller.speed_limit_rpm - 16.85f) < 0.001f,
+              "capture phase starts at the verified 75mmps limit");
+
+  for(index = 0U; index < 30U; index++)
+  {
+    update_sample(&controller, &sample, 0, 74.15f, 0.0f);
+  }
+  expect_true(controller.speed_phase ==
               MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT,
-              "adaptive task starts in fast-straight phase");
-  expect_true(fabsf(controller.speed_limit_rpm - 74.15f) < 0.001f,
-              "fast-straight phase initially allows requested cruise speed");
+              "300ms centered capture enters fast straight");
 
   for(index = 0U; index < 40U; index++)
   {
     update_sample(&controller, &sample,
-                  ((index & 1U) == 0U) ? 10 : -10, 74.15f);
+                  ((index & 1U) == 0U) ? 20 : -20,
+                  74.15f, 0.8f);
   }
   expect_true(controller.speed_phase ==
               MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT,
-              "centered quantization jitter does not lock out fast cruise");
+              "straight 2mm jitter does not lock out fast cruise");
 
-  update_sample(&controller, &sample, 30, 74.15f);
+  update_sample(&controller, &sample, 40, 74.15f, 4.5f);
+  update_sample(&controller, &sample, 45, 74.15f, 4.5f);
+  update_sample(&controller, &sample, 50, 74.15f, 4.5f);
   expect_true(controller.speed_phase ==
               MAGNETIC_FOLLOW_SPEED_CURVE_SUSPECT,
-              "sustained 3mm trend enters curve-suspect phase");
-  expect_true(controller.speed_limit_rpm < 74.15f,
-              "curve suspicion begins deceleration immediately");
+              "sustained outward trend and yaw enter curve suspect");
+  expect_true(controller.speed_limit_rpm <= 33.71f,
+              "curve suspicion applies the 150mmps cap immediately");
 
-  for(index = 0U; index < 4U; index++)
+  for(index = 0U; index < 5U; index++)
   {
-    update_sample(&controller, &sample, 50, 74.15f);
+    update_sample(&controller, &sample, 65, 74.15f, 7.0f);
   }
   expect_true(controller.speed_phase ==
               MAGNETIC_FOLLOW_SPEED_CURVE_TRACK,
               "confirmed curve selects the 75mmps tracking phase");
+  expect_true(controller.speed_limit_rpm <= 16.86f,
+              "confirmed curve applies the 75mmps cap immediately");
 
-  update_sample(&controller, &sample, 90, 74.15f);
+  update_sample(&controller, &sample, 95, 74.15f, 12.5f);
   expect_true(controller.speed_phase ==
               MAGNETIC_FOLLOW_SPEED_CURVE_EMERGENCY,
               "large curve error selects the 50mmps emergency phase");
+  expect_true(controller.speed_limit_rpm <= 11.24f,
+              "emergency curve applies the 50mmps cap immediately");
   for(index = 0U; index < 100U; index++)
   {
-    update_sample(&controller, &sample, 90, 74.15f);
+    update_sample(&controller, &sample, 95, 74.15f, 12.5f);
   }
   expect_true((controller.speed_limit_rpm >= 11.22f) &&
               (controller.speed_limit_rpm <= 11.24f),
@@ -236,7 +253,8 @@ static void test_adaptive_high_speed_curve_phases(void)
   for(index = 0U; index < 60U; index++)
   {
     update_sample(&controller, &sample,
-                  ((index & 1U) == 0U) ? 10 : -10, 74.15f);
+                  ((index & 1U) == 0U) ? 20 : -20,
+                  74.15f, 0.5f);
   }
   expect_true(controller.speed_phase ==
               MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT,

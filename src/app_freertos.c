@@ -8,6 +8,8 @@
 #include "app_freertos.h"
 
 #include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -16,6 +18,8 @@
 #include "chassis_motion_controller.h"
 #include "canfd_protocol.h"
 #include "debug_uart_log.h"
+#include "dock_ir_receiver.h"
+#include "dock_tof_sensor.h"
 #include "motion_command.h"
 #include "motor_speed_control.h"
 #include "serial_motion_protocol.h"
@@ -23,13 +27,16 @@
 #define APP_CONTROL_TASK_PRIORITY                5U
 #define APP_SERIAL_TASK_PRIORITY                 3U
 #define APP_CANFD_TASK_PRIORITY                  3U
+#define APP_DOCK_TASK_PRIORITY                   2U
 #define APP_CONTROL_TASK_STACK_WORDS          1024U
 #define APP_SERIAL_TASK_STACK_WORDS            512U
 #define APP_CANFD_TASK_STACK_WORDS             768U
+#define APP_DOCK_TASK_STACK_WORDS             2048U
 #define APP_COMMAND_QUEUE_LENGTH                  8U
 #define APP_CONTROL_PERIOD_MS                    10U
 #define APP_SERIAL_POLL_PERIOD_MS                 2U
 #define APP_CANFD_POLL_PERIOD_MS                  2U
+#define APP_DOCK_SAMPLE_PERIOD_MS               100U
 #define APP_PRIORITY_COMMAND_COUNT                4U
 
 #define APP_PRIORITY_ESTOP_INDEX                  0U
@@ -54,6 +61,10 @@ static TaskHandle_t app_serial_task_handle;
 static StaticTask_t app_canfd_task_storage;
 static StackType_t app_canfd_task_stack[APP_CANFD_TASK_STACK_WORDS];
 static TaskHandle_t app_canfd_task_handle;
+
+static StaticTask_t app_dock_task_storage;
+static StackType_t app_dock_task_stack[APP_DOCK_TASK_STACK_WORDS];
+static TaskHandle_t app_dock_task_handle;
 
 static StaticQueue_t app_command_queue_storage;
 static uint8_t app_command_queue_buffer[
@@ -228,6 +239,7 @@ static void app_canfd_task(void *parameter)
   (void)parameter;
   for(;;)
   {
+    dock_ir_receiver_sample_2ms();
     canfd_protocol_poll(
         (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS));
     vTaskDelayUntil(&last_wake_tick,
@@ -248,9 +260,69 @@ static void app_serial_task(void *parameter)
   }
 }
 
+static int16_t app_dock_to_i16(int32_t value)
+{
+  if(value > INT16_MAX)
+  {
+    return INT16_MAX;
+  }
+  if(value < INT16_MIN)
+  {
+    return INT16_MIN;
+  }
+  return (int16_t)value;
+}
+
+static void app_dock_task(void *parameter)
+{
+  dock_tof_snapshot_t snapshot;
+  canfd_dock_status_t status;
+  uint8_t scl_level;
+  uint8_t sda_level;
+  int32_t bus_error;
+
+  (void)parameter;
+  (void)dock_tof_sensor_init(NULL);
+  for(;;)
+  {
+    (void)dock_tof_sensor_sample(&snapshot);
+    dock_tof_sensor_get_bus_diagnostics(&scl_level, &sda_level,
+                                        &bus_error);
+    memset(&status, 0, sizeof(status));
+    status.uptime_ms =
+        (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    status.sample_sequence = snapshot.sample_sequence;
+    status.left_mm = snapshot.left_filtered_mm;
+    status.right_mm = snapshot.right_filtered_mm;
+    status.distance_error_mm = app_dock_to_i16(
+        snapshot.distance_error_mm);
+    status.alignment_error_mm = app_dock_to_i16(
+        snapshot.alignment_error_mm);
+    status.ir_falling_edges = dock_ir_receiver_get_falling_edges();
+    status.flags =
+        ((dock_tof_sensor_is_ready() != 0U) ? 0x01U : 0U) |
+        ((snapshot.left_valid != 0U) ? 0x02U : 0U) |
+        ((snapshot.right_valid != 0U) ? 0x04U : 0U) |
+        ((snapshot.pair_valid != 0U) ? 0x08U : 0U) |
+        ((dock_ir_receiver_get_activity() != 0U) ? 0x10U : 0U) |
+        ((scl_level != 0U) ? 0x20U : 0U) |
+        ((sda_level != 0U) ? 0x40U : 0U);
+    status.ir_activity_percent =
+        dock_ir_receiver_get_activity_percent();
+    status.left_api_status = snapshot.left_api_status;
+    status.right_api_status = snapshot.right_api_status;
+    status.left_range_status = snapshot.left_range_status;
+    status.right_range_status = snapshot.right_range_status;
+    status.bus_error = bus_error;
+    canfd_protocol_send_dock_status(&status);
+    vTaskDelay(pdMS_TO_TICKS(APP_DOCK_SAMPLE_PERIOD_MS));
+  }
+}
+
 uint8_t app_freertos_init(void)
 {
   debug_uart_log_init();
+  dock_ir_receiver_init();
 
   app_command_queue = xQueueCreateStatic(
       APP_COMMAND_QUEUE_LENGTH,
@@ -293,16 +365,25 @@ uint8_t app_freertos_init(void)
       APP_CANFD_TASK_PRIORITY,
       app_canfd_task_stack,
       &app_canfd_task_storage);
+  app_dock_task_handle = xTaskCreateStatic(
+      app_dock_task,
+      "DockSensors",
+      APP_DOCK_TASK_STACK_WORDS,
+      NULL,
+      APP_DOCK_TASK_PRIORITY,
+      app_dock_task_stack,
+      &app_dock_task_storage);
 
   if((app_control_task_handle == NULL) ||
      (app_serial_task_handle == NULL) ||
-     (app_canfd_task_handle == NULL))
+     (app_canfd_task_handle == NULL) ||
+     (app_dock_task_handle == NULL))
   {
     return 0U;
   }
 
   debug_uart_log_printf(
-      "FREERTOS,READY,CTRL=5,SERIAL=3,CANFD=3,CMDQ=8\r\n");
+      "FREERTOS,READY,CTRL=5,SERIAL=3,CANFD=3,DOCK=2,CMDQ=8\r\n");
   return 1U;
 }
 

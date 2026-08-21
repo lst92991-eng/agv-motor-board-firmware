@@ -28,6 +28,7 @@
 #include "bumper_input.h"
 #include "canfd_protocol.h"
 #include "debug_uart_transport.h"
+#include "dock_ir_receiver.h"
 #include "motor_driver.h"
 #include "motor_encoder.h"
 
@@ -162,6 +163,12 @@ void EXINT9_5_IRQHandler(void)
   confirm_state left_changed = FALSE;
   confirm_state right_changed = FALSE;
   uint8_t bumper_changed = 0U;
+
+  if(exint_interrupt_flag_get(EXINT_LINE_8) != RESET)
+  {
+    exint_flag_clear(EXINT_LINE_8);
+    dock_ir_receiver_falling_edge_irq_handler();
+  }
 
   if(exint_interrupt_flag_get(EXINT_LINE_5) != RESET)
   {

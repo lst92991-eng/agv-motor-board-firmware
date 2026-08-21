@@ -106,6 +106,7 @@ static int16_t motor_speed_axis_update_command(motor_speed_axis_t *axis)
   float correction;
   float command;
   float command_delta;
+  float command_slew_limit;
   float measured_forward_rpm;
   float recovery_pwm;
 
@@ -276,9 +277,17 @@ static int16_t motor_speed_axis_update_command(motor_speed_axis_t *axis)
   }
 
   command_delta = command - axis->pwm_command;
+  command_slew_limit = MOTOR_SPEED_PWM_SLEW_PER_CYCLE;
+  if(((command >= 0.0f) && (axis->pwm_command >= 0.0f) &&
+      (command < axis->pwm_command)) ||
+     ((command <= 0.0f) && (axis->pwm_command <= 0.0f) &&
+      (command > axis->pwm_command)))
+  {
+    command_slew_limit = MOTOR_SPEED_PWM_DECEL_SLEW_PER_CYCLE;
+  }
   command_delta = motor_speed_limit(command_delta,
-                                    -MOTOR_SPEED_PWM_SLEW_PER_CYCLE,
-                                    MOTOR_SPEED_PWM_SLEW_PER_CYCLE);
+                                    -command_slew_limit,
+                                    command_slew_limit);
   axis->pwm_command += command_delta;
 
   if((axis->pid_active == 0U) &&

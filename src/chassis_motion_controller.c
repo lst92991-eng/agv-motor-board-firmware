@@ -23,6 +23,7 @@
 #include "chassis_heading_fusion.h"
 #include "debug_uart_transport.h"
 #include "debug_uart_log.h"
+#include "dock_ir_receiver.h"
 #include "imu_heading.h"
 #include "magnetic_follow_controller.h"
 #include "motion_command.h"
@@ -44,7 +45,7 @@
 #define CHASSIS_CONTROL_ENCODER_MISMATCH_COUNTS         1200L
 #define CHASSIS_CONTROL_ENCODER_CHECK_MIN_COUNTS        1500L
 
-#define CHASSIS_CONTROL_MIN_DISTANCE_MM                  300L
+#define CHASSIS_CONTROL_MIN_DISTANCE_MM                   50L
 #define CHASSIS_CONTROL_MAX_DISTANCE_MM                 3000L
 #define CHASSIS_CONTROL_MAX_MAG_DISTANCE_MM             6000L
 #define CHASSIS_CONTROL_MIN_SPEED_MM_S                    50U
@@ -81,6 +82,13 @@
 #define CHASSIS_HEADING_DISAGREEMENT_TICKS                  50U
 
 #define CHASSIS_MAG_INVALID_STOP_TICKS                         10U
+/*
+ * 磁条在物理末端会自然从“可循迹”变为无磁。摆车可能覆盖目标路程的
+ * 一小段，因此终点窗口按目标路程10%计算，并限制在50~500 mm。
+ */
+#define CHASSIS_MAG_TERMINAL_MARGIN_RATIO                      0.10f
+#define CHASSIS_MAG_TERMINAL_MARGIN_MIN_MM                    50.0f
+#define CHASSIS_MAG_TERMINAL_MARGIN_MAX_MM                   500.0f
 
 #define CHASSIS_CONTROL_RECOVER_STABLE_TICKS               30U
 #define CHASSIS_CONTROL_RECOVER_TIMEOUT_TICKS              500U
@@ -195,6 +203,7 @@ static uint32_t chassis_last_cycle_count;
 static void chassis_send_safety_can(uint8_t urgent);
 static uint8_t chassis_is_driving(void);
 static void chassis_fail_task(uint16_t fault);
+static void chassis_complete_task(void);
 
 static int32_t chassis_abs_count(int32_t value)
 {
@@ -217,6 +226,15 @@ static float chassis_limit(float value, float value_min, float value_max)
     return value_max;
   }
   return value;
+}
+
+static float chassis_get_magnetic_terminal_margin_mm(void)
+{
+  return chassis_limit(
+      (float)chassis_abs_count(chassis_target_distance_mm) *
+          CHASSIS_MAG_TERMINAL_MARGIN_RATIO,
+      CHASSIS_MAG_TERMINAL_MARGIN_MIN_MM,
+      CHASSIS_MAG_TERMINAL_MARGIN_MAX_MM);
 }
 
 static float chassis_wrap_deg(float angle_deg)
@@ -317,14 +335,36 @@ static uint8_t chassis_update_magnetic_follow(float dt_s)
     }
     if(chassis_magnetic_invalid_ticks >= CHASSIS_MAG_INVALID_STOP_TICKS)
     {
-      debug_uart_log_printf(
-          "MAG_FAULT,age=%u,status=%u,flags=0x%02X,strength=%u,offset=%d\r\n",
-          (uint32_t)sample.age_ms,
-          (uint32_t)sample.status,
-          (uint32_t)sample.flags,
-          (uint32_t)sample.strength,
-          (int)sample.offset_x10mm);
-      chassis_fail_task(CHASSIS_FAULT_MAGNETIC);
+      float remaining_mm =
+          (float)chassis_abs_count(chassis_target_distance_mm) -
+          chassis_path_distance_mm;
+
+      float terminal_margin_mm =
+          chassis_get_magnetic_terminal_margin_mm();
+
+      if(remaining_mm <= terminal_margin_mm)
+      {
+        debug_uart_log_printf(
+            "MAG_TERMINAL,remaining=%ld,margin=%ld,strength=%u,offset=%d\r\n",
+            (long)chassis_round_to_int(remaining_mm),
+            (long)chassis_round_to_int(terminal_margin_mm),
+            (uint32_t)sample.strength,
+            (int)sample.offset_x10mm);
+        chassis_complete_task();
+      }
+      else
+      {
+        debug_uart_log_printf(
+            "MAG_FAULT,remaining=%ld,age=%u,status=%u,flags=0x%02X,"
+            "strength=%u,offset=%d\r\n",
+            (long)chassis_round_to_int(remaining_mm),
+            (uint32_t)sample.age_ms,
+            (uint32_t)sample.status,
+            (uint32_t)sample.flags,
+            (uint32_t)sample.strength,
+            (int)sample.offset_x10mm);
+        chassis_fail_task(CHASSIS_FAULT_MAGNETIC);
+      }
     }
     return 0U;
   }
@@ -334,7 +374,8 @@ static uint8_t chassis_update_magnetic_follow(float dt_s)
   chassis_convert_magnetic_sample(&sample, &control_sample);
   magnetic_follow_controller_update(&chassis_magnetic_controller,
                                       &control_sample,
-                                      chassis_requested_run_rpm);
+                                      chassis_requested_run_rpm,
+                                      imu_heading_get_rate_dps());
 
   /*
    * 路径航向只用于诊断和后续控制阶段衔接；磁循迹轮差由目标角速度直接生成，
@@ -1636,7 +1677,18 @@ static void chassis_send_telemetry(void)
   motor_status.right_invalid_count = chassis_to_u8(
       motor_encoder_get_invalid_transition_count(CHASSIS_RIGHT_MOTOR));
   motor_status.state = (uint8_t)chassis_state;
+  motor_status.ir_activity = dock_ir_receiver_get_activity();
+  motor_status.ir_activity_percent =
+      dock_ir_receiver_get_activity_percent();
+  motor_status.ir_raw_level = dock_ir_receiver_get_raw_level();
+  motor_status.ir_falling_edges =
+      dock_ir_receiver_get_falling_edges();
   canfd_protocol_send_motor_status(&motor_status);
+  debug_uart_log_printf("IR,active=%u,duty=%u,raw=%u,edges=%u\r\n",
+                        (uint32_t)motor_status.ir_activity,
+                        (uint32_t)motor_status.ir_activity_percent,
+                        (uint32_t)motor_status.ir_raw_level,
+                        (uint32_t)motor_status.ir_falling_edges);
 }
 
 static uint8_t chassis_get_safety_source_mask(void)
@@ -1901,7 +1953,7 @@ void chassis_motion_controller_init(void)
     chassis_reset_heading_estimator();
     chassis_heading_target_deg = 0.0f;
     debug_uart_log_printf(
-        "CHASSIS_CONTROL,READY,TRANSLATE_300_3000MM,"
+        "CHASSIS_CONTROL,READY,TRANSLATE_50_3000MM,"
         "ROTATE_10_90DEG,50_100MM_S\r\n");
   }
   else

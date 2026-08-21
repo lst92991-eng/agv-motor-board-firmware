@@ -41,6 +41,7 @@ typedef struct
   float last_offset_error_mm;
   float offset_rate_mm_s;
   float yaw_rate_target_dps;
+  float actual_yaw_rate_dps;
   float speed_limit_rpm;
   uint16_t curve_evidence_ticks;
   uint16_t straight_evidence_ticks;
@@ -75,7 +76,8 @@ void magnetic_follow_controller_start(
 void magnetic_follow_controller_update(
     magnetic_follow_controller_t *controller,
     const magnetic_follow_sample_t *sample,
-    float requested_run_rpm);
+    float requested_run_rpm,
+    float actual_yaw_rate_dps);
 
 /* 将目标Yaw角速度换算为差速轮速前馈，并用陀螺仪角速度闭环补偿。 */
 float magnetic_follow_controller_wheel_correction_rpm(

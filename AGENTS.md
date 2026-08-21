@@ -43,6 +43,7 @@ Linux/RK3576 Supervisor负责非实时决策，只能通过正式CAN FD运动接
 - `ChassisCtrl`：优先级5，10ms；唯一允许修改底盘运动状态。
 - `SerialComm`：优先级3，2ms；调试串口协议入口。
 - `CANFD`：优先级3，2ms；CAN帧收发和200ms控制租约。
+- `DockSensors`：优先级2，阻塞式双TOF采样和`0x582`对接遥测。
 - `MotionCmdQ`：8项静态队列；ESTOP、通信超时、bus-off、STOP走优先安全通道。
 - ISR只采样和置位，不执行阻塞通信、日志或运动控制。
 
@@ -58,10 +59,13 @@ CAN FD、串口、防撞和失联停车。
 - `canfd_protocol.*`负责CAN硬件、命令会话和租约；
 - `canfd_status_codec.*`负责可主机测试的状态PDO字节布局。
 
+已经接入正式低优先级采集，但尚未完成机械标定和整车验收：
+
+- `dock_tof_sensor.*`：双TOF初始化、滤波、左右几何误差和`0x582`遥测；
+- `dock_ir_receiver.*`：PA8下降沿、100ms活动窗口和`0x581/0x582`遥测。
+
 已经沉淀为驱动/数据接口，但尚未接入正式任务：
 
-- `dock_tof_sensor.*`：双TOF初始化、测距有效性、滤波及左右几何误差；
-- `dock_ir_receiver.*`：红外接收原始载波状态；
 - `pn532_uart5.*`、`rfid_record.*`：RFID底层协议和记录格式；
 - `adc_monitor.*`、`motor_current.*`：ADC采集基础模块。
 
@@ -94,8 +98,9 @@ CAN FD、串口、防撞和失联停车。
 - 四方向落地运动：通过。
 - 四路防撞本地锁存：通过。
 - CAN FD 500k/4M BRS与失联停车：通过。
-- 2400mm直线、圆滑L型低速和L型往返：通过；L型往返峰值约190mm/s，
-  330mm/s直线巡航仍待独立验收。
+- 2400mm直线、圆滑L型低速和L型往返：通过；完整回充模拟流程已按250mm/s
+  直线峰值、75mm/s弯道完成实车验收。330mm/s不作为当前L型弯道验收速度。
+- 38kHz红外接收和上位机有限角度峰值扫描：实车通过；正式Supervisor任务仍待接入。
 - 双TOF基础测距历史测试通过，但当前安装和120度V形靶标必须重新标定。
 
 详细能力边界见`hardware/motor_board_capability_baseline_2026-08-19.md`。

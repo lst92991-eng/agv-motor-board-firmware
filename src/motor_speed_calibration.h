@@ -17,7 +17,9 @@
 /* 前馈保留实车低速克服静摩擦所需的偏置，PI只补偿负载和个体差异。 */
 #define MOTOR_SPEED_FEED_FORWARD_PER_RPM               9.4f
 #define MOTOR_SPEED_FEED_FORWARD_STATIC_PWM          100.0f
+/* 加速保持柔和；弯前减速必须快速撤掉旧PWM，避免目标已降速但车辆继续冲行。 */
 #define MOTOR_SPEED_PWM_SLEW_PER_CYCLE                12.0f
+#define MOTOR_SPEED_PWM_DECEL_SLEW_PER_CYCLE          80.0f
 
 /* 20ms、2640 count/rev时单个计数约为1.14RPM。 */
 #define MOTOR_SPEED_FILTER_ALPHA                       0.20f

@@ -89,7 +89,7 @@ function Add-FlmCall {
   $commands.Add("reg r2 $R2")
   $commands.Add("resume $ProgramCounter")
   $commands.Add("wait_halt $TimeoutMs")
-  $commands.Add('reg r0')
+  $commands.Add("echo FLM_RETURN_$Name=[reg r0]")
   $commands.Add("echo FLM_END_$Name")
 }
 
@@ -113,25 +113,29 @@ for ($page = 0; $page -lt $pageCount; $page++) {
 Add-FlmCall 'UNINIT_PROGRAM' '0x200000DB' '2' '0' '0' 5000
 
 $commands.Add("verify_image $firmwareOcd 0x08000000 bin")
-$commands.Add('mdw 0x08000000 8')
+$commands.Add('echo FLASH_VERIFY_COMMAND_OK')
+$commands.Add('echo FLASH_WORDS=[read_memory 0x08000000 32 8]')
 $commands.Add('shutdown')
 
-$arguments = @(
-  '-s', $scripts,
-  '-f', 'interface/stlink.cfg',
-  '-c', 'transport select swd',
-  # 该批次AT32F456实测SWD DPIDR为0x2BA01477。
-  '-c', 'set CPUTAPID 0x2ba01477',
-  '-f', 'target/artery/at32f4x.cfg'
-)
-foreach ($command in $commands) {
-  $arguments += @('-c', $command)
-}
-
 $logPath = Join-Path $env:TEMP 'at32f456_stlink_program.log'
-& $openocd @arguments 2>&1 |
+$commandPath = Join-Path $env:TEMP 'at32f456_stlink_program.cfg'
+$configLines = [System.Collections.Generic.List[string]]::new()
+$configLines.Add('source [find interface/stlink.cfg]')
+$configLines.Add('transport select swd')
+# 该批次AT32F456实测SWD DPIDR为0x2BA01477。
+$configLines.Add('set CPUTAPID 0x2ba01477')
+$configLines.Add('source [find target/artery/at32f4x.cfg]')
+foreach ($command in $commands) {
+  $configLines.Add($command)
+}
+[System.IO.File]::WriteAllLines(
+  $commandPath,
+  $configLines,
+  [System.Text.UTF8Encoding]::new($false))
+
+& $openocd -s $scripts -f $commandPath 2>&1 |
   Tee-Object -FilePath $logPath |
-  Where-Object { $_ -match 'FLM_BEGIN|FLM_END|r0 \(/32\)|verified|Error:|0x08000000:' }
+  Where-Object { $_ -match 'FLM_BEGIN|FLM_RETURN|FLM_END|FLASH_VERIFY|FLASH_WORDS|Error:' }
 $flashExitCode = $LASTEXITCODE
 if ($flashExitCode -ne 0) {
   throw "Programming or verification failed; target remains halted. OpenOCD exit: $flashExitCode"
@@ -142,7 +146,7 @@ $badCalls = @()
 $callPattern = '(?s)FLM_BEGIN_(?<name>\S+)(?<body>.*?)FLM_END_\k<name>'
 foreach ($call in [regex]::Matches($logText, $callPattern)) {
   $returns = [regex]::Matches($call.Groups['body'].Value,
-                              'r0 \(/32\): 0x(?<value>[0-9A-Fa-f]{8})')
+                              'FLM_RETURN_\S+=.*0x(?<value>[0-9A-Fa-f]{8})')
   if (($returns.Count -eq 0) -or
       ($returns[$returns.Count - 1].Groups['value'].Value -ne '00000000')) {
     $badCalls += $call.Groups['name'].Value

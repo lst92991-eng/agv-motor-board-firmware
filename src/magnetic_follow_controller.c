@@ -44,14 +44,16 @@
 #define MAG_FOLLOW_ADAPTIVE_CURVE_CAP_RPM                     16.85f
 #define MAG_FOLLOW_ADAPTIVE_EMERGENCY_CAP_RPM                 11.23f
 #define MAG_FOLLOW_ADAPTIVE_SPEED_RISE_RPM                     0.20f
-#define MAG_FOLLOW_SUSPECT_OFFSET_MM                           2.5f
-#define MAG_FOLLOW_SUSPECT_YAW_RATE_DPS                        3.0f
-#define MAG_FOLLOW_CONFIRM_OFFSET_MM                           4.0f
-#define MAG_FOLLOW_CONFIRM_YAW_RATE_DPS                        5.0f
-#define MAG_FOLLOW_EMERGENCY_OFFSET_MM                         8.0f
-#define MAG_FOLLOW_EMERGENCY_YAW_RATE_DPS                     10.0f
-#define MAG_FOLLOW_EXIT_OFFSET_MM                              2.5f
-#define MAG_FOLLOW_EXIT_YAW_RATE_DPS                           3.5f
+#define MAG_FOLLOW_SUSPECT_OFFSET_MM                           4.0f
+#define MAG_FOLLOW_SUSPECT_TREND_MM_S                          5.0f
+#define MAG_FOLLOW_SUSPECT_ACTUAL_YAW_DPS                      4.0f
+#define MAG_FOLLOW_CONFIRM_OFFSET_MM                           6.0f
+#define MAG_FOLLOW_CONFIRM_ACTUAL_YAW_DPS                      6.0f
+#define MAG_FOLLOW_EMERGENCY_OFFSET_MM                         9.0f
+#define MAG_FOLLOW_EMERGENCY_ACTUAL_YAW_DPS                   12.0f
+#define MAG_FOLLOW_EXIT_OFFSET_MM                              3.0f
+#define MAG_FOLLOW_EXIT_ACTUAL_YAW_DPS                         2.5f
+#define MAG_FOLLOW_SUSPECT_ENTER_TICKS                          3U
 #define MAG_FOLLOW_CONFIRM_TICKS                                5U
 #define MAG_FOLLOW_SUSPECT_TIMEOUT_TICKS                       20U
 #define MAG_FOLLOW_CURVE_EXIT_TICKS                            30U
@@ -112,8 +114,12 @@ static void magnetic_follow_update_adaptive_speed_phase(
     float offset_error_mm)
 {
   float absolute_offset_mm = magnetic_follow_abs_float(offset_error_mm);
-  float absolute_yaw_rate_dps = magnetic_follow_abs_float(
+  float absolute_target_yaw_rate_dps = magnetic_follow_abs_float(
       controller->yaw_rate_target_dps);
+  float absolute_actual_yaw_rate_dps = magnetic_follow_abs_float(
+      controller->actual_yaw_rate_dps);
+  uint8_t outward_trend;
+  uint8_t yaw_evidence;
   uint8_t suspect;
   uint8_t confirmed;
   uint8_t emergency;
@@ -124,22 +130,34 @@ static void magnetic_follow_update_adaptive_speed_phase(
     return;
   }
 
-  suspect = ((absolute_offset_mm >= MAG_FOLLOW_SUSPECT_OFFSET_MM) ||
-             (absolute_yaw_rate_dps >=
-              MAG_FOLLOW_SUSPECT_YAW_RATE_DPS)) ? 1U : 0U;
+  outward_trend = (((offset_error_mm >= MAG_FOLLOW_SUSPECT_OFFSET_MM) &&
+                    (controller->offset_rate_mm_s >=
+                     MAG_FOLLOW_SUSPECT_TREND_MM_S)) ||
+                   ((offset_error_mm <= -MAG_FOLLOW_SUSPECT_OFFSET_MM) &&
+                    (controller->offset_rate_mm_s <=
+                     -MAG_FOLLOW_SUSPECT_TREND_MM_S))) ? 1U : 0U;
+  yaw_evidence = ((absolute_offset_mm >= 2.5f) &&
+                  (absolute_actual_yaw_rate_dps >=
+                   MAG_FOLLOW_SUSPECT_ACTUAL_YAW_DPS) &&
+                  ((controller->yaw_rate_target_dps *
+                    controller->actual_yaw_rate_dps) > 0.0f)) ? 1U : 0U;
+  suspect = ((outward_trend != 0U) || (yaw_evidence != 0U)) ? 1U : 0U;
   confirmed = ((absolute_offset_mm >= MAG_FOLLOW_CONFIRM_OFFSET_MM) ||
-               (absolute_yaw_rate_dps >=
-                MAG_FOLLOW_CONFIRM_YAW_RATE_DPS)) ? 1U : 0U;
+               ((absolute_actual_yaw_rate_dps >=
+                 MAG_FOLLOW_CONFIRM_ACTUAL_YAW_DPS) &&
+                (absolute_target_yaw_rate_dps >= 4.0f) &&
+                ((controller->yaw_rate_target_dps *
+                  controller->actual_yaw_rate_dps) > 0.0f))) ? 1U : 0U;
   emergency = ((absolute_offset_mm >= MAG_FOLLOW_EMERGENCY_OFFSET_MM) ||
                ((absolute_offset_mm >= 6.0f) &&
-                (absolute_yaw_rate_dps >=
-                 MAG_FOLLOW_EMERGENCY_YAW_RATE_DPS))) ? 1U : 0U;
+                (absolute_actual_yaw_rate_dps >=
+                 MAG_FOLLOW_EMERGENCY_ACTUAL_YAW_DPS))) ? 1U : 0U;
   /* 0.1 mm量化在10 ms采样下会制造很大的瞬时偏移变化率，不能把它作为
    * 直线恢复的硬门槛；用偏移和实际所需转向量连续确认即可。
    */
   straight = ((absolute_offset_mm <= MAG_FOLLOW_EXIT_OFFSET_MM) &&
-              (absolute_yaw_rate_dps <=
-               MAG_FOLLOW_EXIT_YAW_RATE_DPS)) ? 1U : 0U;
+              (absolute_actual_yaw_rate_dps <=
+               MAG_FOLLOW_EXIT_ACTUAL_YAW_DPS)) ? 1U : 0U;
 
   if(emergency != 0U)
   {
@@ -153,9 +171,20 @@ static void magnetic_follow_update_adaptive_speed_phase(
   {
     if(suspect != 0U)
     {
-      controller->speed_phase = MAGNETIC_FOLLOW_SPEED_CURVE_SUSPECT;
-      controller->curve_evidence_ticks = 1U;
-      controller->straight_evidence_ticks = 0U;
+      if(controller->curve_evidence_ticks < UINT16_MAX)
+      {
+        controller->curve_evidence_ticks++;
+      }
+      if(controller->curve_evidence_ticks >=
+         MAG_FOLLOW_SUSPECT_ENTER_TICKS)
+      {
+        controller->speed_phase = MAGNETIC_FOLLOW_SPEED_CURVE_SUSPECT;
+        controller->straight_evidence_ticks = 0U;
+      }
+    }
+    else
+    {
+      controller->curve_evidence_ticks = 0U;
     }
   }
   else if(controller->speed_phase == MAGNETIC_FOLLOW_SPEED_CURVE_SUSPECT)
@@ -216,7 +245,7 @@ static void magnetic_follow_update_adaptive_speed_phase(
           MAGNETIC_FOLLOW_SPEED_CURVE_EMERGENCY)
   {
     if((absolute_offset_mm <= 6.0f) &&
-       (absolute_yaw_rate_dps <= 8.0f))
+       (absolute_actual_yaw_rate_dps <= 8.0f))
     {
       if(controller->straight_evidence_ticks < UINT16_MAX)
       {
@@ -378,8 +407,10 @@ void magnetic_follow_controller_start(
        (requested_run_rpm >= MAG_FOLLOW_ADAPTIVE_ENABLE_RPM)) ? 1U : 0U;
   if(controller->adaptive_high_speed != 0U)
   {
-    controller->speed_phase = MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT;
-    controller->speed_limit_rpm = requested_run_rpm;
+    /* 高速任务先以已验证的75mm/s捕获磁条，连续居中后再升速。 */
+    controller->speed_phase = MAGNETIC_FOLLOW_SPEED_CURVE_TRACK;
+    controller->speed_limit_rpm = magnetic_follow_cap_speed(
+        requested_run_rpm, MAG_FOLLOW_ADAPTIVE_CURVE_CAP_RPM);
   }
   else
   {
@@ -392,7 +423,8 @@ void magnetic_follow_controller_start(
 void magnetic_follow_controller_update(
     magnetic_follow_controller_t *controller,
     const magnetic_follow_sample_t *sample,
-    float requested_run_rpm)
+    float requested_run_rpm,
+    float actual_yaw_rate_dps)
 {
   float offset_error_mm;
   float controlled_error_mm;
@@ -415,6 +447,7 @@ void magnetic_follow_controller_update(
   controller->offset_x10mm = sample->offset_x10mm;
   controller->strength = sample->strength;
   controller->age_ms = sample->age_ms;
+  controller->actual_yaw_rate_dps = actual_yaw_rate_dps;
   offset_error_mm = ((float)sample->offset_x10mm -
                      (float)controller->target_offset_x10mm) / 10.0f;
 
@@ -544,16 +577,29 @@ void magnetic_follow_controller_update(
             MAG_FOLLOW_FULL_SPEED_OFFSET_MM));
     }
   }
-  speed_limit_step_rpm = magnetic_follow_limit(
-      speed_limit_target_rpm - controller->speed_limit_rpm,
-      -MAG_FOLLOW_SPEED_LIMIT_FALL_RPM,
-      (controller->adaptive_high_speed != 0U) ?
-      MAG_FOLLOW_ADAPTIVE_SPEED_RISE_RPM :
-      MAG_FOLLOW_SPEED_LIMIT_RISE_RPM);
-  controller->speed_limit_rpm = magnetic_follow_limit(
-      controller->speed_limit_rpm + speed_limit_step_rpm,
-      minimum_speed_rpm,
-      requested_run_rpm);
+  if((controller->adaptive_high_speed != 0U) &&
+     (speed_limit_target_rpm < controller->speed_limit_rpm))
+  {
+    /*
+     * 高速循迹一旦确认弯道，限速必须在本帧生效。旧的0.75 RPM/帧下降
+     * 需要数秒才能从330 mm/s降到转弯速度，实车会在减速前冲出磁条。
+     * 电机速度环自身仍负责物理减速；这里只取消错误的软件限速滞后。
+     */
+    controller->speed_limit_rpm = speed_limit_target_rpm;
+  }
+  else
+  {
+    speed_limit_step_rpm = magnetic_follow_limit(
+        speed_limit_target_rpm - controller->speed_limit_rpm,
+        -MAG_FOLLOW_SPEED_LIMIT_FALL_RPM,
+        (controller->adaptive_high_speed != 0U) ?
+        MAG_FOLLOW_ADAPTIVE_SPEED_RISE_RPM :
+        MAG_FOLLOW_SPEED_LIMIT_RISE_RPM);
+    controller->speed_limit_rpm = magnetic_follow_limit(
+        controller->speed_limit_rpm + speed_limit_step_rpm,
+        minimum_speed_rpm,
+        requested_run_rpm);
+  }
 }
 
 float magnetic_follow_controller_wheel_correction_rpm(
