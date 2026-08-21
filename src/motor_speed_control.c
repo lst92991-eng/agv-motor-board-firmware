@@ -29,6 +29,9 @@ typedef struct
   uint8_t pid_active;
   uint8_t startup_boost_cycles;
   uint8_t startup_ready_cycles;
+  uint8_t stall_cycles;
+  uint8_t stall_recovery_cycles;
+  uint8_t stall_recovery_active;
 } motor_speed_axis_t;
 
 static motor_speed_axis_t motor_speed_axes[2];
@@ -45,6 +48,11 @@ static float motor_speed_limit(float value, float value_min, float value_max)
   }
 
   return value;
+}
+
+static float motor_speed_abs(float value)
+{
+  return (value < 0.0f) ? -value : value;
 }
 
 static float motor_speed_count_delta_to_rpm(int32_t count_delta)
@@ -87,6 +95,9 @@ static void motor_speed_axis_reset_control(motor_speed_axis_t *axis)
   axis->last_valid_raw_rpm = 0.0f;
   axis->startup_boost_cycles = 0U;
   axis->startup_ready_cycles = 0U;
+  axis->stall_cycles = 0U;
+  axis->stall_recovery_cycles = 0U;
+  axis->stall_recovery_active = 0U;
 }
 
 static int16_t motor_speed_axis_update_command(motor_speed_axis_t *axis)
@@ -95,6 +106,8 @@ static int16_t motor_speed_axis_update_command(motor_speed_axis_t *axis)
   float correction;
   float command;
   float command_delta;
+  float measured_forward_rpm;
+  float recovery_pwm;
 
   if(axis->target_rpm == 0.0f)
   {
@@ -159,6 +172,82 @@ static int16_t motor_speed_axis_update_command(motor_speed_axis_t *axis)
   }
 
   feed_forward = motor_speed_feed_forward(axis->target_rpm);
+  measured_forward_rpm = (axis->target_rpm > 0.0f) ?
+                         axis->measured_rpm : -axis->measured_rpm;
+
+  if(axis->stall_recovery_active == 2U)
+  {
+    axis->pwm_command = 0.0f;
+    return 0;
+  }
+
+  if(axis->stall_recovery_active == 1U)
+  {
+    if((motor_speed_abs(axis->target_rpm) <
+        MOTOR_SPEED_STALL_TARGET_MIN_RPM) ||
+       (measured_forward_rpm >= MOTOR_SPEED_STALL_RELEASE_RPM))
+    {
+      axis->stall_recovery_active = 0U;
+      axis->stall_cycles = 0U;
+      axis->stall_recovery_cycles = 0U;
+      motor_pid_reset(&axis->pid);
+      axis->pid_active = 0U;
+      /* 越障成功后立即撤掉满扭矩，避免按普通斜率退扭造成车轮高速冲出。 */
+      axis->pwm_command = (axis->target_rpm > 0.0f) ?
+                          MOTOR_SPEED_START_BOOST_MAX_PWM :
+                          -MOTOR_SPEED_START_BOOST_MAX_PWM;
+    }
+    else if(axis->stall_recovery_cycles >=
+            MOTOR_SPEED_STALL_RECOVERY_CYCLES)
+    {
+      /* 单次脱困失败后禁止周期性反复冲击，交由底盘失配/无进展保护停车。 */
+      axis->stall_recovery_active = 2U;
+      axis->pwm_command = 0.0f;
+      return 0;
+    }
+    else
+    {
+      recovery_pwm = MOTOR_SPEED_STALL_RECOVERY_START_PWM +
+          ((float)axis->stall_recovery_cycles *
+           MOTOR_SPEED_STALL_RECOVERY_SLEW_PWM);
+      recovery_pwm = motor_speed_limit(
+          recovery_pwm,
+          MOTOR_SPEED_STALL_RECOVERY_START_PWM,
+          MOTOR_SPEED_STALL_RECOVERY_MAX_PWM);
+      axis->stall_recovery_cycles++;
+      axis->pwm_command = (axis->target_rpm > 0.0f) ?
+                          recovery_pwm : -recovery_pwm;
+      return (int16_t)axis->pwm_command;
+    }
+  }
+
+  if((motor_speed_abs(axis->target_rpm) >=
+      MOTOR_SPEED_STALL_TARGET_MIN_RPM) &&
+     (measured_forward_rpm <= MOTOR_SPEED_STALL_MEASURED_MAX_RPM) &&
+     (motor_speed_abs(axis->pwm_command) >=
+      MOTOR_SPEED_STALL_PWM_THRESHOLD))
+  {
+    if(axis->stall_cycles < MOTOR_SPEED_STALL_DETECT_CYCLES)
+    {
+      axis->stall_cycles++;
+    }
+  }
+  else
+  {
+    axis->stall_cycles = 0U;
+  }
+  if(axis->stall_cycles >= MOTOR_SPEED_STALL_DETECT_CYCLES)
+  {
+    motor_pid_reset(&axis->pid);
+    axis->pid_active = 0U;
+    axis->stall_cycles = 0U;
+    axis->stall_recovery_active = 1U;
+    axis->stall_recovery_cycles = 1U;
+    axis->pwm_command = (axis->target_rpm > 0.0f) ?
+                        MOTOR_SPEED_STALL_RECOVERY_START_PWM :
+                        -MOTOR_SPEED_STALL_RECOVERY_START_PWM;
+    return (int16_t)axis->pwm_command;
+  }
 
   /* 启动斜坡达到前馈值之前冻结积分，防止启动阶段积分饱和。 */
   if(axis->pid_active == 0U)
@@ -341,6 +430,13 @@ int16_t motor_speed_control_get_pwm(motor_id_t motor)
   }
 
   return motor_speed_axes[motor].pwm;
+}
+
+uint8_t motor_speed_control_has_stall_recovery_failed(void)
+{
+  return ((motor_speed_axes[MOTOR_LEFT].stall_recovery_active == 2U) ||
+          (motor_speed_axes[MOTOR_RIGHT].stall_recovery_active == 2U)) ?
+         1U : 0U;
 }
 
 void motor_speed_control_hold_brake(void)

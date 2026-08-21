@@ -39,6 +39,17 @@ static magnetic_follow_sample_t make_trackable_sample(void)
   return sample;
 }
 
+static void update_sample(magnetic_follow_controller_t *controller,
+                          magnetic_follow_sample_t *sample,
+                          int16_t offset_x10mm,
+                          float requested_run_rpm)
+{
+  sample->sequence++;
+  sample->receive_time_ms += 10UL;
+  sample->offset_x10mm = offset_x10mm;
+  magnetic_follow_controller_update(controller, sample, requested_run_rpm);
+}
+
 static void test_trackability(void)
 {
   magnetic_follow_sample_t sample = make_trackable_sample();
@@ -170,12 +181,77 @@ static void test_curve_mode_uses_global_offset(void)
               "global -3.3mm centroid commands only a small right correction");
 }
 
+static void test_adaptive_high_speed_curve_phases(void)
+{
+  magnetic_follow_sample_t sample = make_trackable_sample();
+  magnetic_follow_controller_t controller;
+  uint16_t index;
+
+  sample.offset_x10mm = 0;
+  magnetic_follow_controller_start(&controller, 0, 1U, &sample, 74.15f);
+  expect_true(controller.adaptive_high_speed != 0U,
+              "330mmps request enables adaptive high-speed scheduling");
+  expect_true(controller.speed_phase ==
+              MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT,
+              "adaptive task starts in fast-straight phase");
+  expect_true(fabsf(controller.speed_limit_rpm - 74.15f) < 0.001f,
+              "fast-straight phase initially allows requested cruise speed");
+
+  for(index = 0U; index < 40U; index++)
+  {
+    update_sample(&controller, &sample,
+                  ((index & 1U) == 0U) ? 10 : -10, 74.15f);
+  }
+  expect_true(controller.speed_phase ==
+              MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT,
+              "centered quantization jitter does not lock out fast cruise");
+
+  update_sample(&controller, &sample, 30, 74.15f);
+  expect_true(controller.speed_phase ==
+              MAGNETIC_FOLLOW_SPEED_CURVE_SUSPECT,
+              "sustained 3mm trend enters curve-suspect phase");
+  expect_true(controller.speed_limit_rpm < 74.15f,
+              "curve suspicion begins deceleration immediately");
+
+  for(index = 0U; index < 4U; index++)
+  {
+    update_sample(&controller, &sample, 50, 74.15f);
+  }
+  expect_true(controller.speed_phase ==
+              MAGNETIC_FOLLOW_SPEED_CURVE_TRACK,
+              "confirmed curve selects the 75mmps tracking phase");
+
+  update_sample(&controller, &sample, 90, 74.15f);
+  expect_true(controller.speed_phase ==
+              MAGNETIC_FOLLOW_SPEED_CURVE_EMERGENCY,
+              "large curve error selects the 50mmps emergency phase");
+  for(index = 0U; index < 100U; index++)
+  {
+    update_sample(&controller, &sample, 90, 74.15f);
+  }
+  expect_true((controller.speed_limit_rpm >= 11.22f) &&
+              (controller.speed_limit_rpm <= 11.24f),
+              "emergency curve phase reaches the explicit 50mmps cap");
+
+  for(index = 0U; index < 60U; index++)
+  {
+    update_sample(&controller, &sample,
+                  ((index & 1U) == 0U) ? 10 : -10, 74.15f);
+  }
+  expect_true(controller.speed_phase ==
+              MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT,
+              "stable curve exit returns to fast-straight phase");
+  expect_true(controller.speed_limit_rpm > 11.23f,
+              "fast-straight recovery accelerates with a bounded slew");
+}
+
 int main(void)
 {
   test_trackability();
   test_control_direction_and_limits();
   test_curve_response_and_low_speed_limit();
   test_curve_mode_uses_global_offset();
+  test_adaptive_high_speed_curve_phases();
   if(failures != 0)
   {
     printf("MAGNETIC_FOLLOW_CONTROLLER_TEST_FAIL,%d\n", failures);

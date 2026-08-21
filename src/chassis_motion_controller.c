@@ -49,14 +49,15 @@
 #define CHASSIS_CONTROL_MAX_MAG_DISTANCE_MM             6000L
 #define CHASSIS_CONTROL_MIN_SPEED_MM_S                    50U
 #define CHASSIS_CONTROL_MAX_SPEED_MM_S                   100U
+#define CHASSIS_CONTROL_MAX_ROTATION_SPEED_MM_S          300U
 #define CHASSIS_CONTROL_MAX_MAG_SPEED_MM_S               330U
 #define CHASSIS_CONTROL_MIN_ROTATION_CDEG               1000L
-#define CHASSIS_CONTROL_MAX_ROTATION_CDEG               9000L
+#define CHASSIS_CONTROL_MAX_ROTATION_CDEG              18000L
 #define CHASSIS_CONTROL_ROTATE_DECEL_COUNTS              400L
-#define CHASSIS_CONTROL_ROTATE_MISMATCH_COUNTS           450L
 #define CHASSIS_CONTROL_ROTATE_MIN_FEEDBACK_RPM            3.0f
 #define CHASSIS_CONTROL_ROTATE_CONFIRM_TICKS              20U
-#define CHASSIS_CONTROL_ROTATE_CONFIRM_TIMEOUT_TICKS     200U
+/* 万向轮换向会延迟一侧车轮起转；延长准入窗口但不放宽双轮方向证据。 */
+#define CHASSIS_CONTROL_ROTATE_CONFIRM_TIMEOUT_TICKS     400U
 
 #define CHASSIS_CONTROL_ALIGN_RPM                         12.0f
 #define CHASSIS_CONTROL_LOW_SPEED_RUN_RPM                 25.0f
@@ -188,6 +189,7 @@ static float chassis_left_target_rpm;
 static float chassis_right_target_rpm;
 static float chassis_pose_x_mm;
 static float chassis_pose_y_mm;
+static float chassis_path_distance_mm;
 static uint32_t chassis_last_cycle_count;
 
 static void chassis_send_safety_can(uint8_t urgent);
@@ -370,6 +372,11 @@ static float chassis_get_heading_deg(void)
 
 static float chassis_get_translation_remaining_mm(void)
 {
+  if(chassis_magnetic_follow_task != 0U)
+  {
+    return (float)chassis_abs_count(chassis_target_distance_mm) -
+           chassis_path_distance_mm;
+  }
   return ((float)chassis_target_distance_mm - chassis_pose_x_mm) *
          (float)chassis_translation_direction;
 }
@@ -630,6 +637,8 @@ static void chassis_update_pose(void)
   delta_distance_mm = ((float)delta_counts *
                        CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM) /
                       (float)CHASSIS_CONTROL_COUNTS_PER_REV;
+  /* L/S形循磁任务按实际轮迹弧长完成，不能用初始X方向投影代替路程。 */
+  chassis_path_distance_mm += delta_distance_mm;
   delta_distance_mm *= (float)chassis_translation_direction;
   relative_yaw_deg = chassis_wrap_deg(chassis_get_heading_deg() -
                                       chassis_heading_target_deg);
@@ -918,9 +927,8 @@ static uint8_t chassis_encoder_mismatch(void)
                                           chassis_right_progress);
   if(chassis_rotation_task != 0U)
   {
-    return ((maximum_progress >= CHASSIS_CONTROL_ROTATE_DECEL_COUNTS) &&
-            (progress_difference >=
-             CHASSIS_CONTROL_ROTATE_MISMATCH_COUNTS)) ? 1U : 0U;
+    /* 原地越过地面凸起会产生大轮差；旋转改由单轮脱困失败直接判故障。 */
+    return 0U;
   }
   /* 循磁会持续差速转向，累计轮差是正常控制结果，不能按纯直行失配处理。 */
   if(chassis_magnetic_follow_task != 0U)
@@ -971,10 +979,8 @@ static void chassis_update_deceleration(void)
 
   if(chassis_rotation_task != 0U)
   {
-    int32_t minimum_progress =
-        (chassis_left_progress < chassis_right_progress) ?
-        chassis_left_progress : chassis_right_progress;
-    int32_t remaining_counts = chassis_total_counts - minimum_progress;
+    int32_t remaining_counts = chassis_total_counts -
+                               chassis_center_progress;
 
     if(remaining_counts < 0L)
     {
@@ -1067,7 +1073,10 @@ static void chassis_update_state(void)
     if(chassis_rotation_confirm_ticks >=
        CHASSIS_CONTROL_ROTATE_CONFIRM_TICKS)
     {
-      chassis_rotation_confirmed = 1U;
+      if(chassis_rotation_confirmed == 0U)
+      {
+        chassis_rotation_confirmed = 1U;
+      }
     }
     if((chassis_rotation_confirmed == 0U) &&
        (chassis_task_ticks >=
@@ -1084,6 +1093,12 @@ static void chassis_update_state(void)
     chassis_fail_motion("NO_PROGRESS");
     return;
   }
+  if((chassis_rotation_task != 0U) &&
+     (motor_speed_control_has_stall_recovery_failed() != 0U))
+  {
+    chassis_fail_motion("STALL_RECOVERY_FAILED");
+    return;
+  }
   if(chassis_task_ticks >= chassis_task_timeout_ticks)
   {
     chassis_fail_motion("TASK_TIMEOUT");
@@ -1091,8 +1106,9 @@ static void chassis_update_state(void)
   }
   if((chassis_rotation_task != 0U) &&
      (chassis_rotation_confirmed != 0U) &&
-     (chassis_left_progress >= chassis_total_counts) &&
-     (chassis_right_progress >= chassis_total_counts))
+     (chassis_abs_float(
+          chassis_heading_fusion.fused_yaw_unwrapped_deg) >=
+      ((float)chassis_abs_count(chassis_target_yaw_cdeg) / 100.0f)))
   {
     chassis_complete_task();
     return;
@@ -1165,12 +1181,9 @@ static void chassis_update_state(void)
   else if((chassis_state == CHASSIS_STATE_LINE_TRACK) ||
           (chassis_state == CHASSIS_STATE_SPEED_RAMP))
   {
-    int32_t minimum_progress =
-        (chassis_left_progress < chassis_right_progress) ?
-        chassis_left_progress : chassis_right_progress;
     uint8_t rotation_decelerates =
         ((chassis_rotation_task != 0U) &&
-         (minimum_progress >=
+         (chassis_center_progress >=
           (chassis_total_counts - CHASSIS_CONTROL_ROTATE_DECEL_COUNTS))) ?
         1U : 0U;
 
@@ -1192,6 +1205,7 @@ static void chassis_reset_local_pose(void)
 {
   chassis_pose_x_mm = 0.0f;
   chassis_pose_y_mm = 0.0f;
+  chassis_path_distance_mm = 0.0f;
   chassis_last_pose_progress = 0L;
 }
 
@@ -1287,9 +1301,11 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     }
     if(((translation_task == 0U) && (rotation_task == 0U)) ||
        (goto_data->speed_mm_s < CHASSIS_CONTROL_MIN_SPEED_MM_S) ||
-       (goto_data->speed_mm_s >
-        ((follow_data != NULL) ? CHASSIS_CONTROL_MAX_MAG_SPEED_MM_S :
-                                 CHASSIS_CONTROL_MAX_SPEED_MM_S)))
+        (goto_data->speed_mm_s >
+         ((follow_data != NULL) ? CHASSIS_CONTROL_MAX_MAG_SPEED_MM_S :
+          ((rotation_task != 0U) ?
+           CHASSIS_CONTROL_MAX_ROTATION_SPEED_MM_S :
+           CHASSIS_CONTROL_MAX_SPEED_MM_S))))
     {
       debug_uart_log_printf(
           "TASK_REJECT,%u,POSE_LIMIT,x=%ld,y=%ld,yaw=%ld,speed=%u\r\n",
@@ -1583,7 +1599,8 @@ static void chassis_send_telemetry(void)
   {
     debug_uart_log_printf(
         "MAGFOLLOW,offset=%d,target=%d,strength=%u,age=%u,valid=%u,"
-        "heading=%ld,rate=%ld,offset_rate=%ld,speed_limit=%ld\r\n",
+        "heading=%ld,rate=%ld,offset_rate=%ld,speed_limit=%ld,"
+        "speed_phase=%u,adaptive=%u,path=%ld\r\n",
         (int)chassis_magnetic_controller.offset_x10mm,
         (int)chassis_magnetic_controller.target_offset_x10mm,
         (uint32_t)chassis_magnetic_controller.strength,
@@ -1595,7 +1612,10 @@ static void chassis_send_telemetry(void)
         chassis_round_to_int(
             chassis_magnetic_controller.offset_rate_mm_s * 100.0f),
         chassis_round_to_int(
-            chassis_magnetic_controller.speed_limit_rpm * 100.0f));
+            chassis_magnetic_controller.speed_limit_rpm * 100.0f),
+        (uint32_t)chassis_magnetic_controller.speed_phase,
+        (uint32_t)chassis_magnetic_controller.adaptive_high_speed,
+        chassis_round_to_int(chassis_path_distance_mm));
   }
 
   motor_status.uptime_ms = chassis_uptime_ms;

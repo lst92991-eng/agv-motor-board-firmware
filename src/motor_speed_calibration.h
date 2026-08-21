@@ -40,6 +40,17 @@
 #define MOTOR_SPEED_START_BOOST_READY_CYCLES            2U
 #define MOTOR_SPEED_START_BOOST_EXIT_RPM                5.0f
 
+/* 堵转200ms后仅允许一次600ms脱困增扭，失败后归零等待底盘锁存停车。 */
+#define MOTOR_SPEED_STALL_TARGET_MIN_RPM                 8.0f
+#define MOTOR_SPEED_STALL_MEASURED_MAX_RPM               1.0f
+#define MOTOR_SPEED_STALL_RELEASE_RPM                    3.0f
+#define MOTOR_SPEED_STALL_PWM_THRESHOLD                350.0f
+#define MOTOR_SPEED_STALL_RECOVERY_START_PWM           700.0f
+#define MOTOR_SPEED_STALL_RECOVERY_MAX_PWM            1000.0f
+#define MOTOR_SPEED_STALL_RECOVERY_SLEW_PWM             30.0f
+#define MOTOR_SPEED_STALL_DETECT_CYCLES                 10U
+#define MOTOR_SPEED_STALL_RECOVERY_CYCLES               30U
+
 /*
  * 左右反馈符号来自实车方向验收。两个电机安装方向相反，正式控制层已经统一为
  * “正值表示车辆向前”，禁止通过试错同时修改驱动极性和反馈符号。

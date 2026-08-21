@@ -83,6 +83,8 @@ static void test_wrap_remains_continuous(void)
   }
 
   expect_near("wrapped fused yaw", fusion.fused_yaw_deg, -160.0f, 0.05f);
+  expect_near("unwrapped fused yaw", fusion.fused_yaw_unwrapped_deg,
+              200.0f, 0.05f);
 }
 
 int main(void)

@@ -39,6 +39,23 @@
 #define MAG_FOLLOW_SPEED_LIMIT_RISE_RPM                        0.10f
 #define MAG_FOLLOW_SPEED_LIMIT_FALL_RPM                        0.75f
 #define MAG_FOLLOW_MIN_REQUEST_RPM                             8.0f
+#define MAG_FOLLOW_ADAPTIVE_ENABLE_RPM                        30.0f
+#define MAG_FOLLOW_ADAPTIVE_SUSPECT_CAP_RPM                   33.70f
+#define MAG_FOLLOW_ADAPTIVE_CURVE_CAP_RPM                     16.85f
+#define MAG_FOLLOW_ADAPTIVE_EMERGENCY_CAP_RPM                 11.23f
+#define MAG_FOLLOW_ADAPTIVE_SPEED_RISE_RPM                     0.20f
+#define MAG_FOLLOW_SUSPECT_OFFSET_MM                           2.5f
+#define MAG_FOLLOW_SUSPECT_YAW_RATE_DPS                        3.0f
+#define MAG_FOLLOW_CONFIRM_OFFSET_MM                           4.0f
+#define MAG_FOLLOW_CONFIRM_YAW_RATE_DPS                        5.0f
+#define MAG_FOLLOW_EMERGENCY_OFFSET_MM                         8.0f
+#define MAG_FOLLOW_EMERGENCY_YAW_RATE_DPS                     10.0f
+#define MAG_FOLLOW_EXIT_OFFSET_MM                              2.5f
+#define MAG_FOLLOW_EXIT_YAW_RATE_DPS                           3.5f
+#define MAG_FOLLOW_CONFIRM_TICKS                                5U
+#define MAG_FOLLOW_SUSPECT_TIMEOUT_TICKS                       20U
+#define MAG_FOLLOW_CURVE_EXIT_TICKS                            30U
+#define MAG_FOLLOW_EMERGENCY_RECOVER_TICKS                     20U
 #define MAG_FOLLOW_TARGET_SIGN                                1.0f
 #define MAG_FOLLOW_PI                                         3.14159265f
 
@@ -82,6 +99,163 @@ static float magnetic_follow_minimum_speed_rpm(
     minimum_speed_rpm = requested_run_rpm;
   }
   return minimum_speed_rpm;
+}
+
+static float magnetic_follow_cap_speed(float requested_run_rpm,
+                                       float cap_rpm)
+{
+  return (requested_run_rpm < cap_rpm) ? requested_run_rpm : cap_rpm;
+}
+
+static void magnetic_follow_update_adaptive_speed_phase(
+    magnetic_follow_controller_t *controller,
+    float offset_error_mm)
+{
+  float absolute_offset_mm = magnetic_follow_abs_float(offset_error_mm);
+  float absolute_yaw_rate_dps = magnetic_follow_abs_float(
+      controller->yaw_rate_target_dps);
+  uint8_t suspect;
+  uint8_t confirmed;
+  uint8_t emergency;
+  uint8_t straight;
+
+  if(controller->adaptive_high_speed == 0U)
+  {
+    return;
+  }
+
+  suspect = ((absolute_offset_mm >= MAG_FOLLOW_SUSPECT_OFFSET_MM) ||
+             (absolute_yaw_rate_dps >=
+              MAG_FOLLOW_SUSPECT_YAW_RATE_DPS)) ? 1U : 0U;
+  confirmed = ((absolute_offset_mm >= MAG_FOLLOW_CONFIRM_OFFSET_MM) ||
+               (absolute_yaw_rate_dps >=
+                MAG_FOLLOW_CONFIRM_YAW_RATE_DPS)) ? 1U : 0U;
+  emergency = ((absolute_offset_mm >= MAG_FOLLOW_EMERGENCY_OFFSET_MM) ||
+               ((absolute_offset_mm >= 6.0f) &&
+                (absolute_yaw_rate_dps >=
+                 MAG_FOLLOW_EMERGENCY_YAW_RATE_DPS))) ? 1U : 0U;
+  /* 0.1 mm量化在10 ms采样下会制造很大的瞬时偏移变化率，不能把它作为
+   * 直线恢复的硬门槛；用偏移和实际所需转向量连续确认即可。
+   */
+  straight = ((absolute_offset_mm <= MAG_FOLLOW_EXIT_OFFSET_MM) &&
+              (absolute_yaw_rate_dps <=
+               MAG_FOLLOW_EXIT_YAW_RATE_DPS)) ? 1U : 0U;
+
+  if(emergency != 0U)
+  {
+    controller->speed_phase = MAGNETIC_FOLLOW_SPEED_CURVE_EMERGENCY;
+    controller->curve_evidence_ticks = 0U;
+    controller->straight_evidence_ticks = 0U;
+    return;
+  }
+
+  if(controller->speed_phase == MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT)
+  {
+    if(suspect != 0U)
+    {
+      controller->speed_phase = MAGNETIC_FOLLOW_SPEED_CURVE_SUSPECT;
+      controller->curve_evidence_ticks = 1U;
+      controller->straight_evidence_ticks = 0U;
+    }
+  }
+  else if(controller->speed_phase == MAGNETIC_FOLLOW_SPEED_CURVE_SUSPECT)
+  {
+    if(suspect != 0U)
+    {
+      if(controller->curve_evidence_ticks < UINT16_MAX)
+      {
+        controller->curve_evidence_ticks++;
+      }
+      controller->straight_evidence_ticks = 0U;
+      if(((confirmed != 0U) &&
+          (controller->curve_evidence_ticks >=
+           MAG_FOLLOW_CONFIRM_TICKS)) ||
+         (controller->curve_evidence_ticks >=
+          MAG_FOLLOW_SUSPECT_TIMEOUT_TICKS))
+      {
+        controller->speed_phase = MAGNETIC_FOLLOW_SPEED_CURVE_TRACK;
+        controller->curve_evidence_ticks = 0U;
+      }
+    }
+    else
+    {
+      controller->curve_evidence_ticks = 0U;
+      if(controller->straight_evidence_ticks < UINT16_MAX)
+      {
+        controller->straight_evidence_ticks++;
+      }
+      if(controller->straight_evidence_ticks >=
+         MAG_FOLLOW_SUSPECT_TIMEOUT_TICKS)
+      {
+        controller->speed_phase = MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT;
+        controller->straight_evidence_ticks = 0U;
+      }
+    }
+  }
+  else if(controller->speed_phase == MAGNETIC_FOLLOW_SPEED_CURVE_TRACK)
+  {
+    if(straight != 0U)
+    {
+      if(controller->straight_evidence_ticks < UINT16_MAX)
+      {
+        controller->straight_evidence_ticks++;
+      }
+      if(controller->straight_evidence_ticks >=
+         MAG_FOLLOW_CURVE_EXIT_TICKS)
+      {
+        controller->speed_phase = MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT;
+        controller->straight_evidence_ticks = 0U;
+      }
+    }
+    else
+    {
+      controller->straight_evidence_ticks = 0U;
+    }
+  }
+  else if(controller->speed_phase ==
+          MAGNETIC_FOLLOW_SPEED_CURVE_EMERGENCY)
+  {
+    if((absolute_offset_mm <= 6.0f) &&
+       (absolute_yaw_rate_dps <= 8.0f))
+    {
+      if(controller->straight_evidence_ticks < UINT16_MAX)
+      {
+        controller->straight_evidence_ticks++;
+      }
+      if(controller->straight_evidence_ticks >=
+         MAG_FOLLOW_EMERGENCY_RECOVER_TICKS)
+      {
+        controller->speed_phase = MAGNETIC_FOLLOW_SPEED_CURVE_TRACK;
+        controller->straight_evidence_ticks = 0U;
+      }
+    }
+    else
+    {
+      controller->straight_evidence_ticks = 0U;
+    }
+  }
+}
+
+static float magnetic_follow_adaptive_speed_target_rpm(
+    const magnetic_follow_controller_t *controller,
+    float requested_run_rpm)
+{
+  if(controller->speed_phase == MAGNETIC_FOLLOW_SPEED_CURVE_SUSPECT)
+  {
+    return magnetic_follow_cap_speed(
+        requested_run_rpm, MAG_FOLLOW_ADAPTIVE_SUSPECT_CAP_RPM);
+  }
+  if(controller->speed_phase == MAGNETIC_FOLLOW_SPEED_CURVE_TRACK)
+  {
+    return magnetic_follow_cap_speed(
+        requested_run_rpm, MAG_FOLLOW_ADAPTIVE_CURVE_CAP_RPM);
+  }
+  if(controller->speed_phase == MAGNETIC_FOLLOW_SPEED_CURVE_EMERGENCY)
+  {
+    return magnetic_follow_cap_speed(
+        requested_run_rpm, MAG_FOLLOW_ADAPTIVE_EMERGENCY_CAP_RPM);
+  }
+  return requested_run_rpm;
 }
 
 void magnetic_follow_controller_reset(
@@ -199,8 +373,20 @@ void magnetic_follow_controller_start(
   controller->last_receive_time_ms = sample->receive_time_ms;
   controller->last_offset_error_mm =
       ((float)sample->offset_x10mm - (float)target_offset_x10mm) / 10.0f;
-  controller->speed_limit_rpm = magnetic_follow_minimum_speed_rpm(
-      requested_run_rpm);
+  controller->adaptive_high_speed =
+      ((controller->allow_multi_peak != 0U) &&
+       (requested_run_rpm >= MAG_FOLLOW_ADAPTIVE_ENABLE_RPM)) ? 1U : 0U;
+  if(controller->adaptive_high_speed != 0U)
+  {
+    controller->speed_phase = MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT;
+    controller->speed_limit_rpm = requested_run_rpm;
+  }
+  else
+  {
+    controller->speed_phase = MAGNETIC_FOLLOW_SPEED_STANDARD;
+    controller->speed_limit_rpm = magnetic_follow_minimum_speed_rpm(
+        requested_run_rpm);
+  }
 }
 
 void magnetic_follow_controller_update(
@@ -325,28 +511,44 @@ void magnetic_follow_controller_update(
       -yaw_rate_limit_dps,
       yaw_rate_limit_dps);
 
+  magnetic_follow_update_adaptive_speed_phase(controller,
+                                               offset_error_mm);
+
   absolute_offset_mm = magnetic_follow_abs_float(offset_error_mm);
-  minimum_speed_rpm = magnetic_follow_minimum_speed_rpm(
-      requested_run_rpm);
-  if(absolute_offset_mm <= MAG_FOLLOW_FULL_SPEED_OFFSET_MM)
+  if(controller->adaptive_high_speed != 0U)
   {
-    speed_limit_target_rpm = requested_run_rpm;
-  }
-  else if(absolute_offset_mm >= MAG_FOLLOW_MIN_SPEED_OFFSET_MM)
-  {
-    speed_limit_target_rpm = minimum_speed_rpm;
+    minimum_speed_rpm = magnetic_follow_cap_speed(
+        requested_run_rpm, MAG_FOLLOW_ADAPTIVE_EMERGENCY_CAP_RPM);
+    speed_limit_target_rpm =
+        magnetic_follow_adaptive_speed_target_rpm(controller,
+                                                  requested_run_rpm);
   }
   else
   {
-    speed_limit_target_rpm = requested_run_rpm -
-        ((requested_run_rpm - minimum_speed_rpm) *
-         (absolute_offset_mm - MAG_FOLLOW_FULL_SPEED_OFFSET_MM) /
-         (MAG_FOLLOW_MIN_SPEED_OFFSET_MM -
-          MAG_FOLLOW_FULL_SPEED_OFFSET_MM));
+    minimum_speed_rpm = magnetic_follow_minimum_speed_rpm(
+        requested_run_rpm);
+    if(absolute_offset_mm <= MAG_FOLLOW_FULL_SPEED_OFFSET_MM)
+    {
+      speed_limit_target_rpm = requested_run_rpm;
+    }
+    else if(absolute_offset_mm >= MAG_FOLLOW_MIN_SPEED_OFFSET_MM)
+    {
+      speed_limit_target_rpm = minimum_speed_rpm;
+    }
+    else
+    {
+      speed_limit_target_rpm = requested_run_rpm -
+          ((requested_run_rpm - minimum_speed_rpm) *
+           (absolute_offset_mm - MAG_FOLLOW_FULL_SPEED_OFFSET_MM) /
+           (MAG_FOLLOW_MIN_SPEED_OFFSET_MM -
+            MAG_FOLLOW_FULL_SPEED_OFFSET_MM));
+    }
   }
   speed_limit_step_rpm = magnetic_follow_limit(
       speed_limit_target_rpm - controller->speed_limit_rpm,
       -MAG_FOLLOW_SPEED_LIMIT_FALL_RPM,
+      (controller->adaptive_high_speed != 0U) ?
+      MAG_FOLLOW_ADAPTIVE_SPEED_RISE_RPM :
       MAG_FOLLOW_SPEED_LIMIT_RISE_RPM);
   controller->speed_limit_rpm = magnetic_follow_limit(
       controller->speed_limit_rpm + speed_limit_step_rpm,

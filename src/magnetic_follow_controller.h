@@ -21,6 +21,15 @@ typedef struct
   uint8_t protocol_valid;
 } magnetic_follow_sample_t;
 
+typedef enum
+{
+  MAGNETIC_FOLLOW_SPEED_STANDARD = 0,
+  MAGNETIC_FOLLOW_SPEED_FAST_STRAIGHT,
+  MAGNETIC_FOLLOW_SPEED_CURVE_SUSPECT,
+  MAGNETIC_FOLLOW_SPEED_CURVE_TRACK,
+  MAGNETIC_FOLLOW_SPEED_CURVE_EMERGENCY
+} magnetic_follow_speed_phase_t;
+
 typedef struct
 {
   int16_t target_offset_x10mm;
@@ -33,8 +42,12 @@ typedef struct
   float offset_rate_mm_s;
   float yaw_rate_target_dps;
   float speed_limit_rpm;
+  uint16_t curve_evidence_ticks;
+  uint16_t straight_evidence_ticks;
   uint8_t allow_multi_peak;
   uint8_t sequence_valid;
+  uint8_t adaptive_high_speed;
+  uint8_t speed_phase;
 } magnetic_follow_controller_t;
 
 /* 清空控制器历史，不保留上一条磁路任务的偏移变化率。 */

@@ -49,11 +49,10 @@ $commands = [System.Collections.Generic.List[string]]::new()
 
 @(
   'adapter speed 100',
-  'reset_config srst_only srst_nogate connect_assert_srst',
   'init',
   'halt',
   'wait_halt 3000',
-  # 先用SYSRESETREQ回到复位态，再装载FLM，避免运行中外设/异常状态影响算法。
+  # NRST未连接，使用目标配置中的SYSRESETREQ回到复位态后再装载FLM。
   'reset halt',
   'wait_halt 3000',
   'reg primask 1',
