@@ -10,9 +10,11 @@
 
 #include "chassis_heading_fusion.h"
 
+#include <math.h>
 #include <stddef.h>
 
 #define CHASSIS_HEADING_RAD_TO_DEG 57.2957795f
+#define CHASSIS_HEADING_DEG_TO_RAD 0.01745329252f
 
 static float chassis_heading_abs_float(float value)
 {
@@ -117,6 +119,38 @@ float chassis_heading_fusion_encoder_delta_deg(
            wheel_circumference_mm) /
           (counts_per_revolution * drive_track_mm)) *
          CHASSIS_HEADING_RAD_TO_DEG;
+}
+
+uint8_t chassis_signed_odometry_integrate(
+    chassis_signed_odometry_pose_t *pose,
+    int32_t left_delta_counts,
+    int32_t right_delta_counts,
+    float wheel_circumference_mm,
+    float counts_per_revolution,
+    float previous_yaw_deg,
+    float current_yaw_deg)
+{
+  float center_delta_counts;
+  float distance_mm;
+  float yaw_delta_deg;
+  float midpoint_yaw_rad;
+
+  if((pose == NULL) || !(wheel_circumference_mm > 0.0f) ||
+     !(counts_per_revolution > 0.0f))
+  {
+    return 0U;
+  }
+  center_delta_counts = ((float)left_delta_counts +
+                         (float)right_delta_counts) * 0.5f;
+  distance_mm = center_delta_counts * wheel_circumference_mm /
+                counts_per_revolution;
+  yaw_delta_deg = chassis_heading_wrap_deg(current_yaw_deg -
+                                            previous_yaw_deg);
+  midpoint_yaw_rad = (previous_yaw_deg + (0.5f * yaw_delta_deg)) *
+                     CHASSIS_HEADING_DEG_TO_RAD;
+  pose->x_mm += distance_mm * cosf(midpoint_yaw_rad);
+  pose->y_mm += distance_mm * sinf(midpoint_yaw_rad);
+  return 1U;
 }
 
 void chassis_heading_fusion_reset(chassis_heading_fusion_t *fusion)

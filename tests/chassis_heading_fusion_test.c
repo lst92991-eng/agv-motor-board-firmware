@@ -87,6 +87,28 @@ static void test_wrap_remains_continuous(void)
               200.0f, 0.05f);
 }
 
+static void test_signed_external_odometry(void)
+{
+  chassis_signed_odometry_pose_t pose = {0.0f, 0.0f};
+  float one_hundred_counts_mm = 100.0f * 267.035f / 2640.0f;
+
+  if(chassis_signed_odometry_integrate(
+       &pose, 100, 100, 267.035f, 2640.0f, 0.0f, 0.0f) == 0U)
+  {
+    fprintf(stderr, "forward signed odometry rejected\n");
+    exit(1);
+  }
+  expect_near("signed odom forward", pose.x_mm,
+              one_hundred_counts_mm, 0.001f);
+  (void)chassis_signed_odometry_integrate(
+      &pose, -100, -100, 267.035f, 2640.0f, 0.0f, 0.0f);
+  expect_near("signed odom reverse", pose.x_mm, 0.0f, 0.001f);
+  (void)chassis_signed_odometry_integrate(
+      &pose, -100, 100, 267.035f, 2640.0f, 0.0f, 10.0f);
+  expect_near("signed odom rotation x", pose.x_mm, 0.0f, 0.001f);
+  expect_near("signed odom rotation y", pose.y_mm, 0.0f, 0.001f);
+}
+
 int main(void)
 {
   test_stationary_encoder_constrains_gyro_bias();
@@ -94,6 +116,7 @@ int main(void)
   test_encoder_spike_is_rejected();
   test_encoder_geometry_reports_left_turn();
   test_wrap_remains_continuous();
+  test_signed_external_odometry();
   puts("CHASSIS_HEADING_FUSION_TEST_PASS");
   return 0;
 }

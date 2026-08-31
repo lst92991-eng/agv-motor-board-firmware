@@ -210,6 +210,9 @@ static motion_reference_control_t chassis_reference_control;
 static agv_motion_reference_t chassis_pending_reference;
 static uint8_t chassis_pending_reference_valid;
 static uint8_t chassis_external_reference_active;
+static int32_t chassis_external_last_left_count;
+static int32_t chassis_external_last_right_count;
+static float chassis_external_last_yaw_deg;
 
 static const motion_reference_platform_limits_t
   chassis_reference_limits =
@@ -891,6 +894,37 @@ static void chassis_enter_state(chassis_state_t next_state)
   }
 }
 
+static void chassis_sync_external_odometry(void)
+{
+  chassis_external_last_left_count = chassis_get_left_encoder_count();
+  chassis_external_last_right_count = chassis_get_right_encoder_count();
+  chassis_external_last_yaw_deg = chassis_get_heading_deg();
+}
+
+static void chassis_update_external_odometry(void)
+{
+  chassis_signed_odometry_pose_t pose;
+  int32_t current_left_count = chassis_get_left_encoder_count();
+  int32_t current_right_count = chassis_get_right_encoder_count();
+  float current_yaw_deg = chassis_get_heading_deg();
+
+  pose.x_mm = chassis_pose_x_mm;
+  pose.y_mm = chassis_pose_y_mm;
+  (void)chassis_signed_odometry_integrate(
+      &pose,
+      current_left_count - chassis_external_last_left_count,
+      current_right_count - chassis_external_last_right_count,
+      CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM,
+      (float)CHASSIS_CONTROL_COUNTS_PER_REV,
+      chassis_external_last_yaw_deg,
+      current_yaw_deg);
+  chassis_pose_x_mm = pose.x_mm;
+  chassis_pose_y_mm = pose.y_mm;
+  chassis_external_last_left_count = current_left_count;
+  chassis_external_last_right_count = current_right_count;
+  chassis_external_last_yaw_deg = current_yaw_deg;
+}
+
 static void chassis_update_external_motion_reference(void)
 {
   agv_motion_reference_t reference;
@@ -898,6 +932,11 @@ static void chassis_update_external_motion_reference(void)
       ((chassis_state == CHASSIS_STATE_IDLE) ||
        (chassis_state == CHASSIS_STATE_HOLD) ||
        (chassis_state == CHASSIS_STATE_VELOCITY_CONTROL)) ? 1U : 0U;
+
+  if(chassis_external_reference_active != 0U)
+  {
+    chassis_update_external_odometry();
+  }
 
   if((chassis_task_active != 0U) ||
      (chassis_motion_enabled == 0U) ||
@@ -915,6 +954,7 @@ static void chassis_update_external_motion_reference(void)
     if(chassis_external_reference_active == 0U)
     {
       motion_reference_control_reset(&chassis_reference_control);
+      chassis_sync_external_odometry();
       chassis_enter_state(CHASSIS_STATE_VELOCITY_CONTROL);
     }
     chassis_pending_reference = reference;
@@ -1506,7 +1546,8 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
           CHASSIS_CONTROL_MIN_ROTATION_CDEG) &&
          (chassis_abs_count(goto_data->yaw_cdeg) <=
           CHASSIS_CONTROL_MAX_ROTATION_CDEG)) ? 1U : 0U;
-    if(chassis_task_active != 0U)
+    if((chassis_task_active != 0U) ||
+       (chassis_external_reference_active != 0U))
     {
       return MOTION_HANDLE_BUSY;
     }
@@ -1728,7 +1769,8 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
 
   if(command->type == MOTION_CMD_RESET_ODOM)
   {
-    if(chassis_task_active != 0U)
+    if((chassis_task_active != 0U) ||
+       (chassis_external_reference_active != 0U))
     {
       return MOTION_HANDLE_BUSY;
     }
@@ -1753,7 +1795,8 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
   {
     canfd_magnetic_sample_t clear_magnetic_sample;
 
-    if(chassis_task_active != 0U)
+    if((chassis_task_active != 0U) ||
+       (chassis_external_reference_active != 0U))
     {
       return MOTION_HANDLE_BUSY;
     }
@@ -1970,6 +2013,11 @@ static void chassis_send_drive_can(void)
   float relative_yaw_deg = chassis_wrap_deg(chassis_get_heading_deg() -
                                              chassis_heading_target_deg);
 
+  if(chassis_external_reference_active != 0U)
+  {
+    relative_yaw_deg = chassis_get_heading_deg();
+  }
+
   status.application_state = chassis_get_application_state();
   status.motion_state = chassis_get_motion_state();
   status.motion_mode = (chassis_external_reference_active != 0U) ? 3U :
@@ -2008,6 +2056,11 @@ static void chassis_send_odom_can(void)
   float right_rpm = chassis_get_right_measured_rpm();
   float linear_mm_s = ((left_rpm + right_rpm) * 0.5f *
                        CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM) / 60.0f;
+
+  if(chassis_external_reference_active != 0U)
+  {
+    relative_yaw_deg = chassis_get_heading_deg();
+  }
 
   status.uptime_ms = chassis_uptime_ms;
   status.x_mm = chassis_round_to_int(chassis_pose_x_mm);

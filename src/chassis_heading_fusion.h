@@ -23,6 +23,12 @@ typedef struct
   uint32_t rejected_encoder_samples;
 } chassis_heading_fusion_t;
 
+typedef struct
+{
+  float x_mm;
+  float y_mm;
+} chassis_signed_odometry_pose_t;
+
 /* 清零相对航向；correction_tau_s 越小，编码器低频约束越强。 */
 void chassis_heading_fusion_init(chassis_heading_fusion_t *fusion,
                                  float correction_tau_s,
@@ -41,6 +47,16 @@ float chassis_heading_fusion_encoder_delta_deg(
     float wheel_circumference_mm,
     float counts_per_revolution,
     float drive_track_mm);
+
+/* Integrate signed wheel counts using the midpoint of two fused headings. */
+uint8_t chassis_signed_odometry_integrate(
+    chassis_signed_odometry_pose_t *pose,
+    int32_t left_delta_counts,
+    int32_t right_delta_counts,
+    float wheel_circumference_mm,
+    float counts_per_revolution,
+    float previous_yaw_deg,
+    float current_yaw_deg);
 
 void chassis_heading_fusion_reset(chassis_heading_fusion_t *fusion);
 
