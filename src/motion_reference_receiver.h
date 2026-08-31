@@ -91,6 +91,10 @@ uint8_t motion_reference_snapshot_is_visible(
     uint8_t session_valid,
     uint8_t motion_active,
     uint8_t busoff);
+uint8_t motion_reference_miss_requires_fault(
+    const agv_motion_reference_t *last_reference,
+    uint32_t now_ms,
+    uint8_t session_valid);
 
 #ifdef __cplusplus
 }

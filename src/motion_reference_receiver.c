@@ -259,3 +259,13 @@ uint8_t motion_reference_snapshot_is_visible(
       accepted_after, barrier_after,
       (barrier_after != 0U) ? 1U : 0U);
 }
+
+uint8_t motion_reference_miss_requires_fault(
+    const agv_motion_reference_t *last_reference,
+    uint32_t now_ms,
+    uint8_t session_valid)
+{
+  return ((session_valid == 0U) ||
+          (agv_motion_reference_is_fresh(last_reference, now_ms) == 0U)) ?
+         1U : 0U;
+}

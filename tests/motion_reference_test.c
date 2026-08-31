@@ -61,6 +61,7 @@ static motion_reference_platform_limits_t default_limits(void)
   limits.drive_track_mm = 500.0f;
   limits.wheel_circumference_mm = 60.0f;
   limits.max_wheel_rpm = 500.0f;
+  limits.yaw_rate_feedback_gain = 0.0f;
   return limits;
 }
 
@@ -308,6 +309,8 @@ static void test_velocity_stop_order_barriers(void)
 
 static void test_motion_reference_snapshot_gate(void)
 {
+  agv_motion_reference_t reference = body_reference(100, 0);
+
   expect_true(motion_reference_snapshot_is_visible(
                   10U, 10U, 10U, 11U, 11U, 1U, 1U, 0U) != 0U,
               "stable snapshot after barrier is visible");
@@ -320,6 +323,15 @@ static void test_motion_reference_snapshot_gate(void)
   expect_true(motion_reference_snapshot_is_visible(
                   10U, 10U, 10U, 11U, 12U, 1U, 1U, 0U) == 0U,
               "accepted order change during snapshot is rejected");
+  expect_true(motion_reference_miss_requires_fault(
+                  &reference, 299U, 1U) == 0U,
+              "transient snapshot miss before TTL is non-latching");
+  expect_true(motion_reference_miss_requires_fault(
+                  &reference, 300U, 1U) != 0U,
+              "exact TTL expiry requires a communication fault");
+  expect_true(motion_reference_miss_requires_fault(
+                  &reference, 101U, 0U) != 0U,
+              "lost session requires a communication fault");
 }
 
 static void test_control_math(void)
@@ -337,6 +349,14 @@ static void test_control_math(void)
               "positive yaw speeds right wheel");
   expect_near(targets.common_scale, 1.0f, 0.001f,
               "unsaturated reference scale");
+  reference = body_reference(100, -400);
+  expect_true(motion_reference_control_compute(
+                  &reference, &limits, &targets) != 0U,
+              "negative yaw reference computes");
+  expect_near(targets.left_rpm, 200.0f, 0.001f,
+              "negative yaw speeds left wheel");
+  expect_near(targets.right_rpm, 0.0f, 0.001f,
+              "negative yaw slows right wheel");
 
   limits.drive_track_mm = 1000.0f;
   limits.max_wheel_rpm = 60.0f;
@@ -374,6 +394,103 @@ static void test_control_math(void)
               "reference above platform deceleration rejected");
 }
 
+static void test_stateful_reference_control(void)
+{
+  motion_reference_platform_limits_t limits = default_limits();
+  motion_reference_control_t nav_control = {0};
+  motion_reference_control_t mag_control = {0};
+  motion_reference_wheel_targets_t nav_targets;
+  motion_reference_wheel_targets_t mag_targets;
+  agv_motion_reference_t reference = body_reference(100, 200);
+  agv_motion_reference_t hold;
+
+  limits.yaw_rate_feedback_gain = 0.25f;
+  expect_true(motion_reference_control_step(
+                  &nav_control, &reference, &limits,
+                  50.0f, 0.02f, &nav_targets) != 0U,
+              "navigation reference steps");
+  reference.source = (uint8_t)AGV_MOTION_SOURCE_MAGNETIC;
+  expect_true(motion_reference_control_step(
+                  &mag_control, &reference, &limits,
+                  50.0f, 0.02f, &mag_targets) != 0U,
+              "magnetic reference steps");
+  expect_near(nav_targets.left_rpm, mag_targets.left_rpm, 0.001f,
+              "source does not change left wheel math");
+  expect_near(nav_targets.right_rpm, mag_targets.right_rpm, 0.001f,
+              "source does not change right wheel math");
+
+  limits.yaw_rate_feedback_gain = 0.0f;
+  motion_reference_control_reset(&nav_control);
+  reference = body_reference(100, 200);
+  expect_true(motion_reference_control_step(
+                  &nav_control, &reference, &limits,
+                  0.0f, 0.02f, &nav_targets) != 0U,
+              "asymmetric curve acceleration steps");
+  expect_near(nav_targets.left_rpm / nav_targets.right_rpm,
+              1.0f / 3.0f, 0.001f,
+              "common slew preserves curve wheel ratio from rest");
+  expect_near(nav_targets.slew_scale, 8.0f / 150.0f, 0.001f,
+              "common slew uses the most restrictive wheel delta");
+
+  motion_reference_control_reset(&nav_control);
+  reference = body_reference(100, 0);
+  expect_true(motion_reference_control_step(
+                  &nav_control, &reference, &limits,
+                  0.0f, 0.02f, &nav_targets) != 0U,
+              "acceleration-limited step computes");
+  expect_near(nav_targets.left_rpm, 8.0f, 0.001f,
+              "acceleration limits left wheel change");
+  expect_near(nav_targets.right_rpm, 8.0f, 0.001f,
+              "acceleration limits right wheel change");
+  expect_true(motion_reference_control_step(
+                  &nav_control, &reference, &limits,
+                  0.0f, 0.02f, &nav_targets) != 0U,
+              "second acceleration step computes");
+  expect_near(nav_targets.left_rpm, 16.0f, 0.001f,
+              "acceleration state accumulates");
+  reference.linear_mm_s = 0;
+  expect_true(motion_reference_control_step(
+                  &nav_control, &reference, &limits,
+                  0.0f, 0.02f, &nav_targets) != 0U,
+              "deceleration-limited step computes");
+  expect_near(nav_targets.left_rpm, 6.0f, 0.001f,
+              "deceleration uses reference decel limit");
+
+  motion_reference_control_reset(&nav_control);
+  reference = body_reference(100, 0);
+  (void)motion_reference_control_step(
+      &nav_control, &reference, &limits, 0.0f, 0.02f, &nav_targets);
+  reference.linear_mm_s = -100;
+  expect_true(motion_reference_control_step(
+                  &nav_control, &reference, &limits,
+                  0.0f, 0.02f, &nav_targets) != 0U,
+              "reverse request decelerates first");
+  expect_near(nav_targets.left_rpm, 0.0f, 0.001f,
+              "reverse interlock reaches left zero");
+  expect_near(nav_targets.right_rpm, 0.0f, 0.001f,
+              "reverse interlock reaches right zero");
+  (void)motion_reference_control_step(
+      &nav_control, &reference, &limits, 0.0f, 0.02f, &nav_targets);
+  expect_true((nav_targets.left_rpm < 0.0f) &&
+              (nav_targets.right_rpm < 0.0f),
+              "reverse starts only after both wheels reached zero");
+
+  memset(&hold, 0, sizeof(hold));
+  hold.reference_id = 9U;
+  hold.produced_ms = 100U;
+  hold.valid_for_ms = 50U;
+  hold.source = (uint8_t)AGV_MOTION_SOURCE_NONE;
+  hold.kind = (uint8_t)AGV_MOTION_KIND_HOLD;
+  expect_true(motion_reference_control_step(
+                  &nav_control, &hold, &limits,
+                  0.0f, 0.02f, &nav_targets) != 0U,
+              "fresh HOLD reference is accepted");
+  expect_near(nav_targets.left_rpm, 0.0f, 0.001f,
+              "HOLD clears left wheel state");
+  expect_near(nav_targets.right_rpm, 0.0f, 0.001f,
+              "HOLD clears right wheel state");
+}
+
 int main(void)
 {
   test_golden_payload_and_ttl();
@@ -383,6 +500,7 @@ int main(void)
   test_velocity_stop_order_barriers();
   test_motion_reference_snapshot_gate();
   test_control_math();
+  test_stateful_reference_control();
   if(failures != 0)
   {
     printf("MOTION_REFERENCE_TEST_FAIL,%d\n", failures);

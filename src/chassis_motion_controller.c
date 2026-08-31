@@ -26,7 +26,10 @@
 #include "dock_ir_receiver.h"
 #include "imu_heading.h"
 #include "magnetic_follow_controller.h"
+#include "math_constants.h"
 #include "motion_command.h"
+#include "motion_reference_control.h"
+#include "motion_reference_receiver.h"
 #include "motor_encoder.h"
 #include "motor_speed_control.h"
 
@@ -37,7 +40,6 @@
 #define CHASSIS_CONTROL_COUNTS_PER_REV                  2640L
 #define CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM           267.035f
 #define CHASSIS_CONTROL_DRIVE_TRACK_MM                    500.0f
-#define CHASSIS_CONTROL_PI                                  3.14159265f
 #define CHASSIS_CONTROL_ALIGN_COUNTS                    1000L
 #define CHASSIS_CONTROL_ALIGN_MAX_COUNTS                2000L
 #define CHASSIS_CONTROL_DECEL_DISTANCE_MM                150.0f
@@ -68,7 +70,6 @@
 #define CHASSIS_CONTROL_LOW_SPEED_RUN_RPM                 25.0f
 #define CHASSIS_CONTROL_MAX_RUN_RPM                       75.0f
 #define CHASSIS_CONTROL_MIN_TRACK_WHEEL_RPM                5.0f
-#define CHASSIS_CONTROL_MIN_CURVE_WHEEL_RPM                2.0f
 #define CHASSIS_CONTROL_DECEL_END_RPM                     10.0f
 #define CHASSIS_CONTROL_RAMP_STEP_RPM                      0.2f
 
@@ -102,6 +103,19 @@
 #define CHASSIS_CONTROL_NO_PROGRESS_TIMEOUT_TICKS          300U
 #define CHASSIS_CONTROL_TASK_TIMEOUT_MARGIN_TICKS         3000UL
 #define CHASSIS_CONTROL_TASK_TIMEOUT_MIN_TICKS            6000UL
+
+#define CHASSIS_REFERENCE_MAX_ANGULAR_MRAD_S                1336U
+#define CHASSIS_REFERENCE_ACCEL_MIN_MM_S2                     10U
+#define CHASSIS_REFERENCE_ACCEL_MAX_MM_S2                    500U
+#define CHASSIS_REFERENCE_DECEL_MIN_MM_S2                     10U
+#define CHASSIS_REFERENCE_DECEL_MAX_MM_S2                   1000U
+#define CHASSIS_REFERENCE_LOCAL_ACCEL_MM_S2                  500U
+#define CHASSIS_REFERENCE_LOCAL_DECEL_MM_S2                 1000U
+#define CHASSIS_REFERENCE_YAW_RATE_FEEDBACK_GAIN              0.35f
+#define CHASSIS_REFERENCE_CONTROL_DT_S                         0.020f
+#define CHASSIS_REFERENCE_APPLY_INVALID                         0U
+#define CHASSIS_REFERENCE_APPLY_DRIVE                           1U
+#define CHASSIS_REFERENCE_APPLY_HOLD                            2U
 
 #define CHASSIS_FAULT_NONE                              0x0000U
 #define CHASSIS_FAULT_ESTOP                             0x0001U
@@ -139,7 +153,8 @@ typedef enum
   CHASSIS_STATE_COMM_ERROR,
   CHASSIS_STATE_CAN_ERROR,
   CHASSIS_STATE_IMU_ERROR,
-  CHASSIS_STATE_MOTION_ERROR
+  CHASSIS_STATE_MOTION_ERROR,
+  CHASSIS_STATE_VELOCITY_CONTROL
 } chassis_state_t;
 
 static chassis_state_t chassis_state;
@@ -191,6 +206,25 @@ static int32_t chassis_heading_last_left_count;
 static int32_t chassis_heading_last_right_count;
 static chassis_heading_fusion_t chassis_heading_fusion;
 static magnetic_follow_controller_t chassis_magnetic_controller;
+static motion_reference_control_t chassis_reference_control;
+static agv_motion_reference_t chassis_pending_reference;
+static uint8_t chassis_pending_reference_valid;
+static uint8_t chassis_external_reference_active;
+
+static const motion_reference_platform_limits_t
+  chassis_reference_limits =
+{
+  CHASSIS_CONTROL_MAX_MAG_SPEED_MM_S,
+  CHASSIS_REFERENCE_MAX_ANGULAR_MRAD_S,
+  CHASSIS_REFERENCE_ACCEL_MIN_MM_S2,
+  CHASSIS_REFERENCE_ACCEL_MAX_MM_S2,
+  CHASSIS_REFERENCE_DECEL_MIN_MM_S2,
+  CHASSIS_REFERENCE_DECEL_MAX_MM_S2,
+  CHASSIS_CONTROL_DRIVE_TRACK_MM,
+  CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM,
+  CHASSIS_CONTROL_MAX_RUN_RPM,
+  CHASSIS_REFERENCE_YAW_RATE_FEEDBACK_GAIN
+};
 
 static float chassis_heading_target_deg;
 static float chassis_heading_error_deg;
@@ -401,10 +435,7 @@ static uint8_t chassis_update_magnetic_follow(float dt_s)
                                       chassis_requested_run_rpm,
                                       imu_heading_get_rate_dps());
 
-  /*
-   * 路径航向只用于诊断和后续控制阶段衔接；磁循迹轮差由目标角速度直接生成，
-   * 不等待累计航向误差，避免回到磁条中心后仍保持旧转向。
-   */
+  /* 路径航向只用于诊断；磁控制输出在20 ms公共Reference入口执行。 */
   chassis_heading_target_deg = chassis_wrap_deg(
       chassis_heading_target_deg +
       (chassis_magnetic_controller.yaw_rate_target_dps * dt_s));
@@ -413,7 +444,7 @@ static uint8_t chassis_update_magnetic_follow(float dt_s)
 
 static int32_t chassis_rotation_target_counts(int32_t yaw_cdeg)
 {
-  float wheel_arc_mm = (CHASSIS_CONTROL_PI *
+  float wheel_arc_mm = (AGV_MATH_PI_F *
                         CHASSIS_CONTROL_DRIVE_TRACK_MM *
                         (float)chassis_abs_count(yaw_cdeg)) / 36000.0f;
 
@@ -486,6 +517,75 @@ static void chassis_set_physical_targets(float left_rpm, float right_rpm)
 {
   motor_speed_control_set_targets(left_rpm * CHASSIS_LEFT_COMMAND_SIGN,
                                   right_rpm * CHASSIS_RIGHT_COMMAND_SIGN);
+}
+
+static void chassis_clear_motion_reference(void)
+{
+  memset(&chassis_pending_reference, 0,
+         sizeof(chassis_pending_reference));
+  chassis_pending_reference_valid = 0U;
+  chassis_external_reference_active = 0U;
+  motion_reference_control_reset(&chassis_reference_control);
+}
+
+static void chassis_make_body_reference(float linear_mm_s,
+                                        float angular_mrad_s,
+                                        uint8_t source)
+{
+  memset(&chassis_pending_reference, 0,
+         sizeof(chassis_pending_reference));
+  chassis_pending_reference.reference_id = chassis_task_sequence;
+  chassis_pending_reference.produced_ms = chassis_uptime_ms;
+  chassis_pending_reference.valid_for_ms = 100U;
+  chassis_pending_reference.linear_mm_s = chassis_to_i16(
+      chassis_round_to_int(linear_mm_s));
+  chassis_pending_reference.angular_mrad_s = chassis_to_i16(
+      chassis_round_to_int(angular_mrad_s));
+  chassis_pending_reference.accel_mm_s2 =
+      CHASSIS_REFERENCE_LOCAL_ACCEL_MM_S2;
+  chassis_pending_reference.decel_mm_s2 =
+      CHASSIS_REFERENCE_LOCAL_DECEL_MM_S2;
+  chassis_pending_reference.source = source;
+  chassis_pending_reference.kind =
+      (uint8_t)AGV_MOTION_KIND_BODY_VELOCITY;
+  chassis_pending_reference_valid =
+      agv_motion_reference_is_valid(&chassis_pending_reference);
+}
+
+static uint8_t chassis_apply_motion_reference(
+    const agv_motion_reference_t *reference,
+    float dt_s)
+{
+  motion_reference_wheel_targets_t targets;
+  float yaw_rate_mrad_s;
+
+  if((reference == NULL) ||
+     (agv_motion_reference_is_fresh(reference, chassis_uptime_ms) == 0U))
+  {
+    return CHASSIS_REFERENCE_APPLY_INVALID;
+  }
+  if(reference->kind == (uint8_t)AGV_MOTION_KIND_HOLD)
+  {
+    chassis_left_target_rpm = 0.0f;
+    chassis_right_target_rpm = 0.0f;
+    motion_reference_control_reset(&chassis_reference_control);
+    motor_speed_control_hold_brake();
+    return CHASSIS_REFERENCE_APPLY_HOLD;
+  }
+  yaw_rate_mrad_s = imu_heading_get_rate_dps() *
+                    AGV_MATH_PI_F * 1000.0f / 180.0f;
+  if(motion_reference_control_step(
+       &chassis_reference_control, reference,
+       &chassis_reference_limits, yaw_rate_mrad_s,
+       dt_s, &targets) == 0U)
+  {
+    return CHASSIS_REFERENCE_APPLY_INVALID;
+  }
+  chassis_left_target_rpm = targets.left_rpm;
+  chassis_right_target_rpm = targets.right_rpm;
+  chassis_set_physical_targets(chassis_left_target_rpm,
+                               chassis_right_target_rpm);
+  return CHASSIS_REFERENCE_APPLY_DRIVE;
 }
 
 static void chassis_sync_heading_encoder(void)
@@ -606,6 +706,8 @@ static const char *chassis_get_state_name(void)
       return "IMU_ERROR";
     case CHASSIS_STATE_MOTION_ERROR:
       return "MOTION_ERROR";
+    case CHASSIS_STATE_VELOCITY_CONTROL:
+      return "VELOCITY_CONTROL";
     default:
       return "UNKNOWN";
   }
@@ -781,10 +883,61 @@ static void chassis_enter_state(chassis_state_t next_state)
           (next_state == CHASSIS_STATE_IMU_ERROR) ||
           (next_state == CHASSIS_STATE_MOTION_ERROR))
   {
+    chassis_clear_motion_reference();
     chassis_base_rpm = 0.0f;
     chassis_left_target_rpm = 0.0f;
     chassis_right_target_rpm = 0.0f;
     motor_speed_control_hold_brake();
+  }
+}
+
+static void chassis_update_external_motion_reference(void)
+{
+  agv_motion_reference_t reference;
+  uint8_t state_allows_reference =
+      ((chassis_state == CHASSIS_STATE_IDLE) ||
+       (chassis_state == CHASSIS_STATE_HOLD) ||
+       (chassis_state == CHASSIS_STATE_VELOCITY_CONTROL)) ? 1U : 0U;
+
+  if((chassis_task_active != 0U) ||
+     (chassis_motion_enabled == 0U) ||
+     (chassis_fault != CHASSIS_FAULT_NONE) ||
+     (state_allows_reference == 0U))
+  {
+    if(chassis_external_reference_active != 0U)
+    {
+      chassis_clear_motion_reference();
+    }
+    return;
+  }
+  if(canfd_protocol_get_motion_reference(&reference) != 0U)
+  {
+    if(chassis_external_reference_active == 0U)
+    {
+      motion_reference_control_reset(&chassis_reference_control);
+      chassis_enter_state(CHASSIS_STATE_VELOCITY_CONTROL);
+    }
+    chassis_pending_reference = reference;
+    chassis_pending_reference_valid = 1U;
+    chassis_external_reference_active = 1U;
+    return;
+  }
+  if(chassis_external_reference_active != 0U)
+  {
+    chassis_pending_reference_valid = 0U;
+    motion_reference_control_reset(&chassis_reference_control);
+    motor_speed_control_hold_brake();
+    if(motion_reference_miss_requires_fault(
+         &chassis_pending_reference,
+         chassis_uptime_ms,
+         canfd_protocol_is_session_valid()) != 0U)
+    {
+      chassis_clear_motion_reference();
+      chassis_motion_enabled = 0U;
+      chassis_fault |= CHASSIS_FAULT_COMM_TIMEOUT;
+      chassis_enter_state(CHASSIS_STATE_COMM_ERROR);
+      chassis_send_safety_can(1U);
+    }
   }
 }
 
@@ -850,12 +1003,6 @@ static void chassis_fail_motion(const char *reason)
 
 static float chassis_get_heading_limit(void)
 {
-  if(chassis_magnetic_follow_task != 0U)
-  {
-    return magnetic_follow_controller_correction_limit_rpm(
-        (chassis_state == CHASSIS_STATE_CASTER_ALIGN) ? 1U : 0U,
-        chassis_magnetic_controller.allow_multi_peak);
-  }
   if(chassis_state == CHASSIS_STATE_CASTER_ALIGN)
   {
     return CHASSIS_HEADING_ALIGN_LIMIT_RPM;
@@ -873,24 +1020,25 @@ static void chassis_update_heading_targets(void)
   float yaw_deg = chassis_get_heading_deg();
   float yaw_rate_dps = imu_heading_get_rate_dps();
   float correction_limit = chassis_get_heading_limit();
-  float effective_base_rpm;
   float minimum_wheel_rpm;
   float same_direction_correction_limit_rpm;
   float signed_base_rpm;
   float target_limit_rpm;
+  float left_rpm;
+  float right_rpm;
+  float linear_mm_s;
+  float angular_mrad_s;
 
   if(chassis_rotation_task != 0U)
   {
     chassis_heading_error_deg = 0.0f;
     chassis_heading_correction_rpm = 0.0f;
-    chassis_left_target_rpm =
-        (chassis_rotation_direction > 0) ? -chassis_base_rpm :
-                                           chassis_base_rpm;
-    chassis_right_target_rpm =
-        (chassis_rotation_direction > 0) ? chassis_base_rpm :
-                                          -chassis_base_rpm;
-    chassis_set_physical_targets(chassis_left_target_rpm,
-                                 chassis_right_target_rpm);
+    angular_mrad_s = (float)chassis_rotation_direction *
+        CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM * chassis_base_rpm *
+        1000.0f /
+        (30.0f * CHASSIS_CONTROL_DRIVE_TRACK_MM);
+    chassis_make_body_reference(0.0f, angular_mrad_s,
+                                (uint8_t)AGV_MOTION_SOURCE_MISSION);
     return;
   }
 
@@ -899,49 +1047,41 @@ static void chassis_update_heading_targets(void)
   {
     chassis_left_target_rpm = 0.0f;
     chassis_right_target_rpm = 0.0f;
+    chassis_pending_reference_valid = 0U;
+    motion_reference_control_reset(&chassis_reference_control);
     motor_speed_control_hold_brake();
     return;
   }
 
   if(chassis_magnetic_follow_task != 0U)
   {
-    /*
-     * 磁偏移外环直接给Yaw角速度；按差速运动学换算轮速前馈，再由BMI270
-     * Z轴角速度闭环补偿。回中时目标角速度立即归零，不保留累计航向滞后。
-     */
     chassis_heading_error_deg = 0.0f;
-    chassis_heading_correction_rpm =
-        magnetic_follow_controller_wheel_correction_rpm(
+    chassis_heading_correction_rpm = 0.0f;
+    chassis_pending_reference_valid =
+        magnetic_follow_controller_make_reference(
             &chassis_magnetic_controller,
-            yaw_rate_dps,
-            CHASSIS_CONTROL_DRIVE_TRACK_MM,
-            CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM);
+            chassis_base_rpm,
+            CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM,
+            chassis_translation_direction,
+            chassis_uptime_ms,
+            CHASSIS_REFERENCE_LOCAL_ACCEL_MM_S2,
+            CHASSIS_REFERENCE_LOCAL_DECEL_MM_S2,
+            &chassis_pending_reference);
+    return;
   }
-  else
-  {
-    chassis_heading_error_deg = chassis_wrap_deg(chassis_heading_target_deg -
-                                                 yaw_deg);
-    chassis_heading_correction_rpm =
-        (CHASSIS_HEADING_KP_RPM_PER_DEG * chassis_heading_error_deg) -
-        (CHASSIS_HEADING_KD_RPM_PER_DPS * yaw_rate_dps);
-  }
+
+  chassis_heading_error_deg = chassis_wrap_deg(chassis_heading_target_deg -
+                                               yaw_deg);
+  chassis_heading_correction_rpm =
+      (CHASSIS_HEADING_KP_RPM_PER_DEG * chassis_heading_error_deg) -
+      (CHASSIS_HEADING_KD_RPM_PER_DPS * yaw_rate_dps);
   chassis_heading_correction_rpm *= CHASSIS_HEADING_CORRECTION_SIGN;
   chassis_heading_correction_rpm = chassis_limit(
       chassis_heading_correction_rpm, -correction_limit, correction_limit);
 
-  effective_base_rpm = chassis_base_rpm;
-  if((chassis_magnetic_follow_task != 0U) &&
-     (effective_base_rpm > chassis_magnetic_controller.speed_limit_rpm))
-  {
-    effective_base_rpm = chassis_magnetic_controller.speed_limit_rpm;
-  }
-  minimum_wheel_rpm =
-      ((chassis_magnetic_follow_task != 0U) &&
-       (chassis_magnetic_controller.allow_multi_peak != 0U)) ?
-      CHASSIS_CONTROL_MIN_CURVE_WHEEL_RPM :
-      CHASSIS_CONTROL_MIN_TRACK_WHEEL_RPM;
-  same_direction_correction_limit_rpm = effective_base_rpm -
-                                        minimum_wheel_rpm;
+  minimum_wheel_rpm = CHASSIS_CONTROL_MIN_TRACK_WHEEL_RPM;
+  same_direction_correction_limit_rpm = chassis_base_rpm -
+                                         minimum_wheel_rpm;
   if(same_direction_correction_limit_rpm < 0.0f)
   {
     same_direction_correction_limit_rpm = 0.0f;
@@ -950,35 +1090,32 @@ static void chassis_update_heading_targets(void)
       chassis_heading_correction_rpm,
       -same_direction_correction_limit_rpm,
       same_direction_correction_limit_rpm);
-  signed_base_rpm = effective_base_rpm *
-                     (float)chassis_translation_direction;
-  chassis_left_target_rpm = signed_base_rpm -
-                            chassis_heading_correction_rpm;
-  chassis_right_target_rpm = signed_base_rpm +
-                             chassis_heading_correction_rpm;
-  target_limit_rpm = (chassis_magnetic_follow_task != 0U) ?
-                     CHASSIS_CONTROL_MAX_RUN_RPM :
-                     (CHASSIS_CONTROL_MAX_RUN_RPM + correction_limit);
+  signed_base_rpm = chassis_base_rpm *
+                      (float)chassis_translation_direction;
+  left_rpm = signed_base_rpm - chassis_heading_correction_rpm;
+  right_rpm = signed_base_rpm + chassis_heading_correction_rpm;
+  target_limit_rpm = CHASSIS_CONTROL_MAX_RUN_RPM + correction_limit;
   if(chassis_translation_direction > 0)
   {
-    chassis_left_target_rpm = chassis_limit(
-        chassis_left_target_rpm, minimum_wheel_rpm,
-        target_limit_rpm);
-    chassis_right_target_rpm = chassis_limit(
-        chassis_right_target_rpm, minimum_wheel_rpm,
-        target_limit_rpm);
+    left_rpm = chassis_limit(left_rpm, minimum_wheel_rpm,
+                             target_limit_rpm);
+    right_rpm = chassis_limit(right_rpm, minimum_wheel_rpm,
+                              target_limit_rpm);
   }
   else
   {
-    chassis_left_target_rpm = chassis_limit(
-        chassis_left_target_rpm,
-        -target_limit_rpm, -minimum_wheel_rpm);
-    chassis_right_target_rpm = chassis_limit(
-        chassis_right_target_rpm,
-        -target_limit_rpm, -minimum_wheel_rpm);
+    left_rpm = chassis_limit(left_rpm,
+                             -target_limit_rpm, -minimum_wheel_rpm);
+    right_rpm = chassis_limit(right_rpm,
+                              -target_limit_rpm, -minimum_wheel_rpm);
   }
-  chassis_set_physical_targets(chassis_left_target_rpm,
-                               chassis_right_target_rpm);
+  linear_mm_s = ((left_rpm + right_rpm) * 0.5f *
+                 CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM) / 60.0f;
+  angular_mrad_s = ((right_rpm - left_rpm) *
+                    CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM * 1000.0f) /
+                   (60.0f * CHASSIS_CONTROL_DRIVE_TRACK_MM);
+  chassis_make_body_reference(linear_mm_s, angular_mrad_s,
+                              (uint8_t)AGV_MOTION_SOURCE_MISSION);
 }
 
 static uint8_t chassis_encoder_mismatch(void)
@@ -1319,6 +1456,7 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     {
       return MOTION_HANDLE_REJECTED;
     }
+    chassis_clear_motion_reference();
     chassis_motion_enabled = 1U;
     chassis_enter_state(CHASSIS_STATE_IDLE);
     return MOTION_HANDLE_ACCEPTED;
@@ -1327,8 +1465,10 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
   if(command->type == MOTION_CMD_DISABLE)
   {
     chassis_cancel_active_task();
+    chassis_clear_motion_reference();
     chassis_motion_enabled = 0U;
     chassis_enter_state(CHASSIS_STATE_IDLE);
+    motor_speed_control_hold_brake();
     return MOTION_HANDLE_ACCEPTED;
   }
 
@@ -1416,6 +1556,7 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
       return MOTION_HANDLE_REJECTED;
     }
 
+    chassis_clear_motion_reference();
     chassis_task_sequence = command->sequence;
     chassis_task_session = command->session_id;
     chassis_task_source = command->source;
@@ -1644,12 +1785,6 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     return MOTION_HANDLE_ACCEPTED;
   }
 
-  /* 速度流协议已经定义，运动学和反向里程计实车验证前保持显式拒绝。 */
-  if(command->type == MOTION_CMD_SET_VELOCITY)
-  {
-    return MOTION_HANDLE_REJECTED;
-  }
-
   return MOTION_HANDLE_REJECTED;
 }
 
@@ -1777,7 +1912,8 @@ static uint8_t chassis_get_application_state(void)
   {
     return 5U;
   }
-  if(chassis_is_driving() != 0U)
+  if((chassis_is_driving() != 0U) ||
+     (chassis_external_reference_active != 0U))
   {
     return 3U;
   }
@@ -1794,7 +1930,8 @@ static uint8_t chassis_get_motion_state(void)
   {
     return 7U;
   }
-  if(chassis_is_driving() != 0U)
+  if((chassis_is_driving() != 0U) ||
+     (chassis_external_reference_active != 0U))
   {
     return 2U;
   }
@@ -1835,8 +1972,9 @@ static void chassis_send_drive_can(void)
 
   status.application_state = chassis_get_application_state();
   status.motion_state = chassis_get_motion_state();
-  status.motion_mode = (chassis_task_active == 0U) ? 0U :
-                       ((chassis_magnetic_follow_task != 0U) ? 2U : 1U);
+  status.motion_mode = (chassis_external_reference_active != 0U) ? 3U :
+                       ((chassis_task_active == 0U) ? 0U :
+                        ((chassis_magnetic_follow_task != 0U) ? 2U : 1U));
   status.flags = 0x04U;
   if(canfd_protocol_is_session_valid() != 0U)
   {
@@ -1984,6 +2122,11 @@ void chassis_motion_controller_init(void)
   chassis_magnetic_sample_valid = 0U;
   chassis_magnetic_invalid_ticks = 0U;
   magnetic_follow_controller_reset(&chassis_magnetic_controller);
+  memset(&chassis_pending_reference, 0,
+         sizeof(chassis_pending_reference));
+  chassis_pending_reference_valid = 0U;
+  chassis_external_reference_active = 0U;
+  motion_reference_control_reset(&chassis_reference_control);
   chassis_heading_disagreement_ticks = 0U;
   chassis_total_counts = 0L;
   chassis_heading_target_deg = 0.0f;
@@ -2028,6 +2171,7 @@ void chassis_motion_controller_step_10ms(void)
 {
   int8_t imu_result;
   float sample_dt_s;
+  uint8_t apply_result;
 
   chassis_uptime_ms += CHASSIS_CONTROL_LOOP_PERIOD_MS;
   sample_dt_s = chassis_get_sample_dt_s();
@@ -2055,20 +2199,44 @@ void chassis_motion_controller_step_10ms(void)
       chassis_heading_target_deg - chassis_get_heading_deg());
   chassis_check_heading_consistency();
   chassis_update_state();
-
-  if(chassis_is_driving() != 0U)
-  {
-    chassis_update_heading_targets();
-  }
+  chassis_update_external_motion_reference();
 
   chassis_speed_ticks++;
   if(chassis_speed_ticks >= CHASSIS_CONTROL_SPEED_PERIOD_TICKS)
   {
     chassis_speed_ticks = 0U;
-    chassis_update_speed_ramp();
     if(chassis_is_driving() != 0U)
     {
-      motor_speed_control_update_now();
+      chassis_update_speed_ramp();
+      chassis_update_heading_targets();
+    }
+    if(((chassis_is_driving() != 0U) ||
+        (chassis_external_reference_active != 0U)) &&
+       (chassis_pending_reference_valid != 0U))
+    {
+      apply_result = chassis_apply_motion_reference(
+          &chassis_pending_reference,
+          CHASSIS_REFERENCE_CONTROL_DT_S);
+      if(apply_result == CHASSIS_REFERENCE_APPLY_DRIVE)
+      {
+        motor_speed_control_update_now();
+      }
+      else if(apply_result == CHASSIS_REFERENCE_APPLY_INVALID)
+      {
+        if(chassis_external_reference_active != 0U)
+        {
+          chassis_clear_motion_reference();
+          chassis_motion_enabled = 0U;
+          chassis_fault |= CHASSIS_FAULT_COMM_TIMEOUT;
+          chassis_enter_state(CHASSIS_STATE_COMM_ERROR);
+          motor_speed_control_hold_brake();
+          chassis_send_safety_can(1U);
+        }
+        else
+        {
+          chassis_fail_motion("REFERENCE_INVALID");
+        }
+      }
     }
     else
     {

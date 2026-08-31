@@ -208,7 +208,7 @@ uint8_t canfd_protocol_get_magnetic_sample(
 
 /*
  * Return the newest accepted 0x401 reference while its effective TTL is
- * fresh. The chassis does not consume this reference until the G3 gate.
+ * fresh and no newer control-command barrier is pending.
  */
 uint8_t canfd_protocol_get_motion_reference(
     agv_motion_reference_t *reference);

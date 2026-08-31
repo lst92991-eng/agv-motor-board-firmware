@@ -18,14 +18,6 @@
 #define MOTION_FOLLOW_MAG_OFFSET_LIMIT_X10MM    100L
 #define MOTION_FOLLOW_MAG_SPEED_MIN_MM_S          50U
 #define MOTION_FOLLOW_MAG_SPEED_MAX_MM_S         330U
-#define MOTION_VELOCITY_LINEAR_LIMIT_MM_S       100L
-#define MOTION_VELOCITY_ANGULAR_LIMIT_MRAD_S    400L
-#define MOTION_VELOCITY_ACCEL_MIN_MM_S2          10U
-#define MOTION_VELOCITY_ACCEL_MAX_MM_S2         500U
-#define MOTION_VELOCITY_DECEL_MIN_MM_S2          10U
-#define MOTION_VELOCITY_DECEL_MAX_MM_S2        1000U
-#define MOTION_VELOCITY_VALID_MIN_MS             50U
-#define MOTION_VELOCITY_VALID_MAX_MS            500U
 
 motion_command_error_t motion_command_validate(const motion_command_t *command)
 {
@@ -78,26 +70,6 @@ motion_command_error_t motion_command_validate(const motion_command_t *command)
       return MOTION_COMMAND_ERROR_RANGE;
     }
   }
-  else if(command->type == MOTION_CMD_SET_VELOCITY)
-  {
-    const motion_velocity_data_t *velocity = &command->data.velocity;
-
-    if((velocity->linear_mm_s < -MOTION_VELOCITY_LINEAR_LIMIT_MM_S) ||
-       (velocity->linear_mm_s > MOTION_VELOCITY_LINEAR_LIMIT_MM_S) ||
-       (velocity->angular_mrad_s <
-        -MOTION_VELOCITY_ANGULAR_LIMIT_MRAD_S) ||
-       (velocity->angular_mrad_s >
-        MOTION_VELOCITY_ANGULAR_LIMIT_MRAD_S) ||
-       (velocity->accel_mm_s2 < MOTION_VELOCITY_ACCEL_MIN_MM_S2) ||
-       (velocity->accel_mm_s2 > MOTION_VELOCITY_ACCEL_MAX_MM_S2) ||
-       (velocity->decel_mm_s2 < MOTION_VELOCITY_DECEL_MIN_MM_S2) ||
-       (velocity->decel_mm_s2 > MOTION_VELOCITY_DECEL_MAX_MM_S2) ||
-       (velocity->valid_time_ms < MOTION_VELOCITY_VALID_MIN_MS) ||
-       (velocity->valid_time_ms > MOTION_VELOCITY_VALID_MAX_MS))
-    {
-      return MOTION_COMMAND_ERROR_RANGE;
-    }
-  }
   else if((command->type != MOTION_CMD_STOP) &&
           (command->type != MOTION_CMD_ESTOP) &&
           (command->type != MOTION_CMD_RESET_ODOM) &&
@@ -129,8 +101,6 @@ const char *motion_command_get_name(motion_command_type_t type)
       return "RESET_ODOM";
     case MOTION_CMD_CLEAR_FAULT:
       return "CLEAR_FAULT";
-    case MOTION_CMD_SET_VELOCITY:
-      return "VELOCITY";
     case MOTION_CMD_COMM_TIMEOUT:
       return "COMM_TIMEOUT";
     case MOTION_CMD_CAN_BUSOFF:

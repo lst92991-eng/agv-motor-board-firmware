@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "agv/motion_contract.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -94,17 +96,16 @@ void magnetic_follow_controller_update(
     float requested_run_rpm,
     float actual_yaw_rate_dps);
 
-/* 将目标Yaw角速度换算为差速轮速前馈，并用陀螺仪角速度闭环补偿。 */
-float magnetic_follow_controller_wheel_correction_rpm(
+/* Convert the magnetic body target to the shared reference contract. */
+uint8_t magnetic_follow_controller_make_reference(
     const magnetic_follow_controller_t *controller,
-    float actual_yaw_rate_dps,
-    float drive_track_mm,
-    float wheel_circumference_mm);
-
-/* 捕获阶段±6RPM；直线稳定循迹±8RPM；曲线稳定循迹±11RPM。 */
-float magnetic_follow_controller_correction_limit_rpm(
-    uint8_t capture_phase,
-    uint8_t allow_multi_peak);
+    float base_rpm,
+    float wheel_circumference_mm,
+    int8_t travel_direction,
+    uint32_t now_ms,
+    uint16_t accel_mm_s2,
+    uint16_t decel_mm_s2,
+    agv_motion_reference_t *reference);
 
 #ifdef __cplusplus
 }

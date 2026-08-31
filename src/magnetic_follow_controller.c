@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "math_constants.h"
+
 #define MAG_FOLLOW_REQUIRED_FLAGS                         0x07U
 #define MAG_FOLLOW_MIN_STRENGTH                            180U
 #define MAG_FOLLOW_MAX_AGE_MS                              100U
@@ -27,11 +29,6 @@
 #define MAG_FOLLOW_CURVE_RATE_TERM_LIMIT_DPS                   3.0f
 #define MAG_FOLLOW_YAW_RATE_LIMIT_DPS                          8.0f
 #define MAG_FOLLOW_CURVE_YAW_RATE_LIMIT_DPS                   12.0f
-#define MAG_FOLLOW_YAW_RATE_INNER_KP_RPM_PER_DPS               0.35f
-#define MAG_FOLLOW_CURVE_YAW_RATE_INNER_KP_RPM_PER_DPS         0.45f
-#define MAG_FOLLOW_CAPTURE_CORRECTION_LIMIT_RPM                6.0f
-#define MAG_FOLLOW_TRACK_CORRECTION_LIMIT_RPM                  8.0f
-#define MAG_FOLLOW_CURVE_CORRECTION_LIMIT_RPM                 11.0f
 #define MAG_FOLLOW_FULL_SPEED_OFFSET_MM                        3.0f
 #define MAG_FOLLOW_MIN_SPEED_OFFSET_MM                        15.0f
 #define MAG_FOLLOW_MIN_SPEED_RPM                              20.0f
@@ -59,7 +56,6 @@
 #define MAG_FOLLOW_CURVE_EXIT_TICKS                            30U
 #define MAG_FOLLOW_EMERGENCY_RECOVER_TICKS                     20U
 #define MAG_FOLLOW_TARGET_SIGN                                1.0f
-#define MAG_FOLLOW_PI                                         3.14159265f
 
 static int32_t magnetic_follow_abs_i32(int32_t value)
 {
@@ -628,40 +624,58 @@ void magnetic_follow_controller_update(
                                      requested_run_rpm);
 }
 
-float magnetic_follow_controller_wheel_correction_rpm(
-    const magnetic_follow_controller_t *controller,
-    float actual_yaw_rate_dps,
-    float drive_track_mm,
-    float wheel_circumference_mm)
+static int16_t magnetic_follow_round_i16(float value)
 {
-  float feedforward_rpm;
-  float inner_kp_rpm_per_dps;
-
-  if((controller == NULL) || (drive_track_mm <= 0.0f) ||
-     (wheel_circumference_mm <= 0.0f))
+  if(value > 32767.0f)
   {
-    return 0.0f;
+    return 32767;
   }
-  feedforward_rpm = controller->yaw_rate_target_dps * MAG_FOLLOW_PI *
-                    drive_track_mm * 30.0f /
-                    (180.0f * wheel_circumference_mm);
-  inner_kp_rpm_per_dps = (controller->allow_multi_peak != 0U) ?
-                         MAG_FOLLOW_CURVE_YAW_RATE_INNER_KP_RPM_PER_DPS :
-                         MAG_FOLLOW_YAW_RATE_INNER_KP_RPM_PER_DPS;
-  return feedforward_rpm +
-         (inner_kp_rpm_per_dps *
-          (controller->yaw_rate_target_dps - actual_yaw_rate_dps));
+  if(value < -32768.0f)
+  {
+    return -32768;
+  }
+  return (int16_t)((value >= 0.0f) ? (value + 0.5f) : (value - 0.5f));
 }
 
-float magnetic_follow_controller_correction_limit_rpm(
-    uint8_t capture_phase,
-    uint8_t allow_multi_peak)
+uint8_t magnetic_follow_controller_make_reference(
+    const magnetic_follow_controller_t *controller,
+    float base_rpm,
+    float wheel_circumference_mm,
+    int8_t travel_direction,
+    uint32_t now_ms,
+    uint16_t accel_mm_s2,
+    uint16_t decel_mm_s2,
+    agv_motion_reference_t *reference)
 {
-  if(capture_phase != 0U)
+  float linear_mm_s;
+  float angular_mrad_s;
+
+  if((controller == NULL) || (reference == NULL) ||
+     !(base_rpm > 0.0f) ||
+     !(wheel_circumference_mm > 0.0f) ||
+     ((travel_direction != 1) && (travel_direction != -1)) ||
+     (accel_mm_s2 == 0U) || (decel_mm_s2 == 0U))
   {
-    return MAG_FOLLOW_CAPTURE_CORRECTION_LIMIT_RPM;
+    return 0U;
   }
-  return (allow_multi_peak != 0U) ?
-         MAG_FOLLOW_CURVE_CORRECTION_LIMIT_RPM :
-         MAG_FOLLOW_TRACK_CORRECTION_LIMIT_RPM;
+  if(base_rpm > controller->speed_limit_rpm)
+  {
+    base_rpm = controller->speed_limit_rpm;
+  }
+  linear_mm_s = base_rpm *
+                wheel_circumference_mm / 60.0f;
+  angular_mrad_s = controller->yaw_rate_target_dps *
+                   AGV_MATH_PI_F * 1000.0f / 180.0f;
+  memset(reference, 0, sizeof(*reference));
+  reference->reference_id = controller->last_sequence;
+  reference->produced_ms = now_ms;
+  reference->valid_for_ms = MAG_FOLLOW_MAX_AGE_MS;
+  reference->linear_mm_s = magnetic_follow_round_i16(
+      linear_mm_s * (float)travel_direction);
+  reference->angular_mrad_s = magnetic_follow_round_i16(angular_mrad_s);
+  reference->accel_mm_s2 = accel_mm_s2;
+  reference->decel_mm_s2 = decel_mm_s2;
+  reference->source = (uint8_t)AGV_MOTION_SOURCE_MAGNETIC;
+  reference->kind = (uint8_t)AGV_MOTION_KIND_BODY_VELOCITY;
+  return agv_motion_reference_is_valid(reference);
 }

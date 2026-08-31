@@ -626,22 +626,11 @@ static void canfd_parse_command(const canfd_frame_t *frame)
   }
   else if(command_code == CANFD_COMMAND_GOTO_REL)
   {
-    arg3 = canfd_get_i32(&frame->data[24]);
-    if((arg3 < 0L) || (arg3 > 65535L) ||
-       (canfd_get_u32(&frame->data[28]) == 0UL) ||
-       (canfd_get_u32(&frame->data[28]) > CANFD_TASK_TIMEOUT_MAX_MS))
-    {
-      canfd_send_result(command_id, session_id,
-                        CANFD_RESULT_STAGE_REJECTED,
-                        CANFD_RESULT_OUT_OF_RANGE, 0U);
-      return;
-    }
-    command.type = MOTION_CMD_GOTO_LOCAL;
-    command.data.goto_local.x_mm = canfd_get_i32(&frame->data[12]);
-    command.data.goto_local.y_mm = canfd_get_i32(&frame->data[16]);
-    command.data.goto_local.yaw_cdeg = canfd_get_i32(&frame->data[20]);
-    command.data.goto_local.speed_mm_s = (uint16_t)arg3;
-    command.data.goto_local.timeout_ms = canfd_get_u32(&frame->data[28]);
+    canfd_send_result(command_id, session_id,
+                      CANFD_RESULT_STAGE_REJECTED,
+                      CANFD_RESULT_UNSUPPORTED_COMMAND,
+                      command_code);
+    return;
   }
   else if(command_code == CANFD_COMMAND_FOLLOW_MAG_START)
   {
@@ -776,10 +765,7 @@ static void canfd_parse_velocity(const canfd_frame_t *frame)
   {
     canfd_accepted_velocity_order = frame->arrival_order;
   }
-  /*
-   * The session/sequence/TTL receiver is ready, but the chassis deliberately
-   * does not consume this reference or publish velocity capability before G3.
-   */
+  /* Chassis consumption remains gated by ARM, faults and the safe getter. */
 }
 
 static void canfd_parse_magnetic(const canfd_frame_t *frame)
@@ -1337,8 +1323,7 @@ void canfd_protocol_send_motion_result(
                  fault_mask, state);
   if(result == MOTION_HANDLE_ACCEPTED)
   {
-    if((command->type == MOTION_CMD_GOTO_LOCAL) ||
-       (command->type == MOTION_CMD_FOLLOW_MAG))
+    if(command->type == MOTION_CMD_FOLLOW_MAG)
     {
       canfd_send_result(command->sequence, command->session_id,
                         CANFD_RESULT_STAGE_EXECUTING,

@@ -82,7 +82,7 @@ static void test_control_direction_and_limits(void)
 {
   magnetic_follow_controller_t controller;
   magnetic_follow_sample_t sample = make_trackable_sample();
-  float correction_rpm;
+  agv_motion_reference_t reference;
 
   magnetic_follow_controller_start(&controller, 0, 0, &sample, 70.0f);
   sample.sequence++;
@@ -101,25 +101,25 @@ static void test_control_direction_and_limits(void)
   expect_true(fabsf(controller.speed_limit_rpm - 20.1f) < 0.001f,
               "speed limit preserves 0.1rpm recovery slew");
 
-  correction_rpm = magnetic_follow_controller_wheel_correction_rpm(
-      &controller, 0.0f, 500.0f, 267.035f);
-  expect_true(correction_rpm > 0.0f,
-              "positive yaw target creates positive differential correction");
-  expect_true(fabsf(magnetic_follow_controller_correction_limit_rpm(
-                        1U, 0U) -
-                    6.0f) < 0.001f,
-              "capture correction limit remains 6rpm");
-  expect_true(fabsf(magnetic_follow_controller_correction_limit_rpm(
-                        0U, 0U) -
-                    8.0f) < 0.001f,
-              "track correction limit remains 8rpm");
+  expect_true(magnetic_follow_controller_make_reference(
+                  &controller, 70.0f, 267.035f, 1, 1020U,
+                  400U, 500U, &reference) != 0U,
+              "magnetic controller creates a body reference");
+  expect_true((reference.source ==
+               (uint8_t)AGV_MOTION_SOURCE_MAGNETIC) &&
+              (reference.linear_mm_s > 0) &&
+              (reference.angular_mrad_s > 0),
+              "positive magnetic target has positive body velocity and yaw");
+  expect_true((reference.accel_mm_s2 == 400U) &&
+              (reference.decel_mm_s2 == 500U),
+              "magnetic reference carries common motion limits");
 }
 
 static void test_curve_response_and_low_speed_limit(void)
 {
   magnetic_follow_sample_t sample = make_trackable_sample();
   magnetic_follow_controller_t controller;
-  float correction_rpm;
+  agv_motion_reference_t reference;
 
   sample.offset_x10mm = 0;
   magnetic_follow_controller_start(&controller, 0, 1U, &sample, 11.23f);
@@ -143,13 +143,14 @@ static void test_curve_response_and_low_speed_limit(void)
   expect_true(controller.yaw_rate_target_dps > 0.0f,
               "falling error cannot reverse a still-positive curve turn");
 
-  correction_rpm = magnetic_follow_controller_wheel_correction_rpm(
-      &controller, 0.0f, 500.0f, 267.035f);
-  expect_true(correction_rpm > 8.0f,
-              "curve yaw loop can request stronger differential drive");
-  expect_true(fabsf(magnetic_follow_controller_correction_limit_rpm(
-                        0U, 1U) - 11.0f) < 0.001f,
-              "curve tracking has an explicit 11rpm correction limit");
+  expect_true(magnetic_follow_controller_make_reference(
+                  &controller, 11.23f, 267.035f, 1, 1030U,
+                  400U, 500U, &reference) != 0U,
+              "curve controller creates a body reference");
+  expect_true(fabsf((float)reference.angular_mrad_s -
+                    (controller.yaw_rate_target_dps *
+                     17.45329252f)) < 1.0f,
+              "curve yaw target converts from dps to mradps");
 }
 
 static void test_curve_mode_uses_global_offset(void)
