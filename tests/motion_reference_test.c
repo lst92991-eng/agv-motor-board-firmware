@@ -86,14 +86,14 @@ static void test_golden_payload_and_ttl(void)
 {
   static const uint8_t expected[AGV_MOTION_REFERENCE_PAYLOAD_SIZE] =
   {
-    0xD4U, 0xC3U, 0xB2U, 0xA1U, 0x44U, 0x33U, 0xC8U, 0x00U,
+    0xD4U, 0xC3U, 0xB2U, 0xA1U, 0x44U, 0x33U, 0x3CU, 0x00U,
     0xFAU, 0x00U, 0xE0U, 0xFCU, 0x90U, 0x01U, 0xF4U, 0x01U
   };
   motion_reference_receiver_t receiver = {0};
   agv_motion_reference_t latest;
   uint8_t payload[AGV_MOTION_REFERENCE_PAYLOAD_SIZE];
 
-  make_payload(payload, UINT32_C(0xA1B2C3D4), 0x3344U, 200U,
+  make_payload(payload, UINT32_C(0xA1B2C3D4), 0x3344U, 60U,
                250, -800, 400U, 500U);
   expect_true(memcmp(payload, expected, sizeof(expected)) == 0,
               "golden 0x401 payload");
@@ -111,7 +111,7 @@ static void test_golden_payload_and_ttl(void)
                   latest.accel_mm_s2 == 400U &&
                   latest.decel_mm_s2 == 500U,
               "golden fields decoded");
-  expect_true(latest.valid_for_ms == 150U,
+  expect_true(latest.valid_for_ms == 60U,
               "TTL is intersected with lease");
   receiver.generation++;
   expect_true(motion_reference_receiver_get_latest(
@@ -122,7 +122,7 @@ static void test_golden_payload_and_ttl(void)
                   &receiver, 1000U, &latest) != 0U,
               "reader accepts a stable even generation");
   expect_true(motion_reference_receiver_get_latest(
-                  &receiver, 1150U, &latest) == 0U,
+                  &receiver, 1060U, &latest) == 0U,
               "effective TTL expires exactly");
 }
 
