@@ -556,9 +556,6 @@ static void canfd_parse_command(const canfd_frame_t *frame)
   uint32_t session_id;
   uint8_t command_code;
   uint8_t session_required = 1U;
-  int32_t arg1;
-  int32_t arg2;
-  int32_t arg3;
 
   if(frame->data_size != 32U)
   {
@@ -635,26 +632,12 @@ static void canfd_parse_command(const canfd_frame_t *frame)
   }
   else if(command_code == CANFD_COMMAND_FOLLOW_MAG_START)
   {
-    arg1 = canfd_get_i32(&frame->data[16]);
-    arg2 = canfd_get_i32(&frame->data[20]);
-    arg3 = canfd_get_i32(&frame->data[24]);
-    if((arg1 < -32768L) || (arg1 > 32767L) ||
-       (arg2 < 0L) || (arg2 > 1L) ||
-       (arg3 < 0L) || (arg3 > 65535L) ||
-       (canfd_get_u32(&frame->data[28]) == 0UL) ||
-       (canfd_get_u32(&frame->data[28]) > CANFD_TASK_TIMEOUT_MAX_MS))
-    {
-      canfd_send_result(command_id, session_id,
-                        CANFD_RESULT_STAGE_REJECTED,
-                        CANFD_RESULT_OUT_OF_RANGE, 0U);
-      return;
-    }
-    command.type = MOTION_CMD_FOLLOW_MAG;
-    command.data.follow_mag.distance_mm = canfd_get_i32(&frame->data[12]);
-    command.data.follow_mag.target_offset_x10mm = (int16_t)arg1;
-    command.data.follow_mag.allow_multi_peak = (uint8_t)arg2;
-    command.data.follow_mag.speed_mm_s = (uint16_t)arg3;
-    command.data.follow_mag.timeout_ms = canfd_get_u32(&frame->data[28]);
+    /* Magnetic motion is produced by Supervisor and arrives only on 0x401. */
+    canfd_send_result(command_id, session_id,
+                      CANFD_RESULT_STAGE_REJECTED,
+                      CANFD_RESULT_UNSUPPORTED_COMMAND,
+                      command_code);
+    return;
   }
   else if(command_code == CANFD_COMMAND_STOP)
   {
