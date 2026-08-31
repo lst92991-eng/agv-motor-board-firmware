@@ -60,6 +60,10 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
 
 当前覆盖航向融合、CAN FD状态PDO、运动参考、维护串口、看门狗、电气监督和速度环。
 
+首次电气标定时，PowerMonitor每500ms通过非阻塞UART输出`POWER,...`原始ADC、
+换算值、零点、故障和Ready状态。测试顺序见
+[电气监督首次标定](hardware/power_commissioning_acceptance.md)。
+
 ## 关键文档
 
 - [能力基线](hardware/motor_board_capability_baseline_2026-08-19.md)

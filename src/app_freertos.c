@@ -43,6 +43,7 @@
 #define APP_WATCHDOG_TASK_STACK_WORDS           256U
 #define APP_COMMAND_QUEUE_LENGTH                  8U
 #define APP_CONTROL_PERIOD_MS                    10U
+#define APP_POWER_DIAGNOSTIC_PERIOD_SAMPLES      25U
 #define APP_SERIAL_POLL_PERIOD_MS                 2U
 #define APP_CANFD_POLL_PERIOD_MS                  2U
 #define APP_DOCK_SAMPLE_PERIOD_MS                 5U
@@ -137,6 +138,11 @@ static void app_power_task(void *parameter)
   uint8_t sample_valid;
   uint8_t severe_fault;
   uint8_t zero_allowed;
+  uint8_t diagnostic_samples = 0U;
+  uint16_t bus_raw;
+  uint16_t left_raw;
+  uint16_t right_raw;
+  power_supervisor_snapshot_t power_snapshot;
   int32_t left_count = motor_encoder_get_count(MOTOR_LEFT);
   int32_t right_count = motor_encoder_get_count(MOTOR_RIGHT);
   int32_t previous_left_count = left_count;
@@ -159,6 +165,9 @@ static void app_power_task(void *parameter)
     }
     sample_valid = ((adc_ready != 0U) &&
                     (motor_current_update() != 0U)) ? 1U : 0U;
+    bus_raw = adc_monitor_get_raw(ADC_MONITOR_PA3);
+    left_raw = motor_current_get_raw(MOTOR_LEFT);
+    right_raw = motor_current_get_raw(MOTOR_RIGHT);
     power_status_after =
         chassis_motion_controller_get_power_status_snapshot();
     left_count = motor_encoder_get_count(MOTOR_LEFT);
@@ -173,9 +182,9 @@ static void app_power_task(void *parameter)
     previous_right_count = right_count;
     power_supervisor_step(
         sample_valid,
-        adc_monitor_get_raw(ADC_MONITOR_PA3),
-        motor_current_get_raw(MOTOR_LEFT),
-        motor_current_get_raw(MOTOR_RIGHT),
+        bus_raw,
+        left_raw,
+        right_raw,
         zero_allowed);
     severe_fault = (uint8_t)(power_supervisor_get_fault_mask() &
                              POWER_FAULT_SEVERE_MASK);
@@ -184,6 +193,27 @@ static void app_power_task(void *parameter)
     {
       command.sequence = 1UL;
       (void)app_submit_motion_command(&command, app_command_queue);
+    }
+    diagnostic_samples++;
+    if(diagnostic_samples >= APP_POWER_DIAGNOSTIC_PERIOD_SAMPLES)
+    {
+      diagnostic_samples = 0U;
+      power_supervisor_get_snapshot(&power_snapshot);
+      (void)debug_uart_log_printf(
+          "POWER,valid=%u,raw=%u,%u,%u,bus_mv=%lu,current_ma=%lu,%lu,"
+          "zero=%u,%u,samples=%u,fault=0x%02X,ready=%u\r\n",
+          (unsigned int)sample_valid,
+          (unsigned int)bus_raw,
+          (unsigned int)left_raw,
+          (unsigned int)right_raw,
+          (unsigned long)power_snapshot.bus_mv,
+          (unsigned long)power_snapshot.left_current_ma,
+          (unsigned long)power_snapshot.right_current_ma,
+          (unsigned int)power_snapshot.left_zero_raw,
+          (unsigned int)power_snapshot.right_zero_raw,
+          (unsigned int)power_snapshot.zero_samples,
+          (unsigned int)power_snapshot.fault_mask,
+          (unsigned int)power_snapshot.ready);
     }
     app_power_generation++;
     vTaskDelayUntil(&last_wake_tick,
