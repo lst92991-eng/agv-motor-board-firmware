@@ -461,6 +461,8 @@ static void chassis_run_speed_tick(void)
   }
   if(chassis_reference.kind == (uint8_t)AGV_MOTION_KIND_HOLD)
   {
+    motor_speed_control_set_targets(0.0f, 0.0f);
+    motor_speed_control_update_now();
     chassis_hold_brake();
     return;
   }

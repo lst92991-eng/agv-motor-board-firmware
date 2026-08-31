@@ -87,6 +87,16 @@ typedef struct
   uint8_t session_required;
 } canfd_command_map_t;
 
+typedef struct
+{
+  uint32_t command_sequence;
+  uint32_t command_session;
+  uint8_t command_payload[32];
+  uint8_t result_payload[16];
+  uint8_t command_valid;
+  uint8_t result_valid;
+} canfd_replay_snapshot_t;
+
 static const canfd_command_map_t canfd_command_map[] =
 {
   {CANFD_COMMAND_RELEASE_CONTROL, MOTION_CMD_RELEASE, 1U},
@@ -318,6 +328,63 @@ static uint8_t canfd_result_code_from_error(motion_command_error_t error)
   return CANFD_RESULT_INTERNAL_ERROR;
 }
 
+static void canfd_cache_command(const canfd_frame_t *frame,
+                                uint32_t command_id,
+                                uint32_t session_id)
+{
+  uint32_t interrupt_state = __get_PRIMASK();
+
+  __disable_irq();
+  canfd_last_command_sequence = command_id;
+  canfd_last_command_session = session_id;
+  memcpy(canfd_last_command_payload, frame->data, 32U);
+  canfd_last_command_valid = 1U;
+  canfd_last_result_valid = 0U;
+  __DMB();
+  if(interrupt_state == 0U)
+  {
+    __enable_irq();
+  }
+}
+
+static void canfd_cache_result(uint32_t command_id,
+                               uint32_t session_id,
+                               const uint8_t payload[16])
+{
+  uint32_t interrupt_state = __get_PRIMASK();
+
+  __disable_irq();
+  if((canfd_last_command_valid != 0U) &&
+     (command_id == canfd_last_command_sequence) &&
+     (session_id == canfd_last_command_session))
+  {
+    memcpy(canfd_last_result_payload, payload, 16U);
+    __DMB();
+    canfd_last_result_valid = 1U;
+  }
+  if(interrupt_state == 0U)
+  {
+    __enable_irq();
+  }
+}
+
+static void canfd_get_replay_snapshot(canfd_replay_snapshot_t *snapshot)
+{
+  uint32_t interrupt_state = __get_PRIMASK();
+
+  __disable_irq();
+  snapshot->command_sequence = canfd_last_command_sequence;
+  snapshot->command_session = canfd_last_command_session;
+  memcpy(snapshot->command_payload, canfd_last_command_payload, 32U);
+  memcpy(snapshot->result_payload, canfd_last_result_payload, 16U);
+  snapshot->command_valid = canfd_last_command_valid;
+  snapshot->result_valid = canfd_last_result_valid;
+  if(interrupt_state == 0U)
+  {
+    __enable_irq();
+  }
+}
+
 static void canfd_send_result(uint32_t command_id,
                               uint32_t session_id,
                               uint8_t stage,
@@ -332,13 +399,7 @@ static void canfd_send_result(uint32_t command_id,
   data[9] = result_code;
   canfd_put_u16(&data[10], detail_code);
   canfd_put_u32(&data[12], canfd_now_ms);
-  if((canfd_last_command_valid != 0U) &&
-     (command_id == canfd_last_command_sequence) &&
-     (session_id == canfd_last_command_session))
-  {
-    memcpy(canfd_last_result_payload, data, sizeof(data));
-    canfd_last_result_valid = 1U;
-  }
+  canfd_cache_result(command_id, session_id, data);
   (void)canfd_queue_payload(CANFD_ID_COMMAND_RESULT, data, 16U, 1U);
 }
 
@@ -428,12 +489,15 @@ static uint8_t canfd_command_is_duplicate(const canfd_frame_t *frame,
                                           uint32_t command_id,
                                           uint32_t session_id)
 {
-  if((canfd_last_command_valid == 0U) ||
-     (session_id != canfd_last_command_session))
+  canfd_replay_snapshot_t cache;
+
+  canfd_get_replay_snapshot(&cache);
+  if((cache.command_valid == 0U) ||
+     (session_id != cache.command_session))
   {
     return 0U;
   }
-  if(command_id < canfd_last_command_sequence)
+  if(command_id < cache.command_sequence)
   {
     canfd_send_result(command_id, session_id,
                       CANFD_RESULT_STAGE_REJECTED,
@@ -441,20 +505,20 @@ static uint8_t canfd_command_is_duplicate(const canfd_frame_t *frame,
                       MOTION_COMMAND_ERROR_SEQUENCE);
     return 1U;
   }
-  if(command_id != canfd_last_command_sequence)
+  if(command_id != cache.command_sequence)
   {
     return 0U;
   }
-  if(memcmp(frame->data, canfd_last_command_payload, 32U) != 0)
+  if(memcmp(frame->data, cache.command_payload, 32U) != 0)
   {
     canfd_send_result(command_id, session_id,
                       CANFD_RESULT_STAGE_REJECTED,
                       CANFD_RESULT_DUPLICATE_MISMATCH, 0U);
   }
-  else if(canfd_last_result_valid != 0U)
+  else if(cache.result_valid != 0U)
   {
     (void)canfd_queue_payload(CANFD_ID_COMMAND_RESULT,
-                              canfd_last_result_payload, 16U, 1U);
+                              cache.result_payload, 16U, 1U);
   }
   else
   {
@@ -498,8 +562,6 @@ static void canfd_accept_claim(uint32_t command_id,
                  (session_id != canfd_host_session)) ? 1U : 0U;
   if(new_session != 0U)
   {
-    canfd_last_command_sequence = command_id;
-    canfd_last_command_session = session_id;
     motion_reference_receiver_reset(&canfd_motion_reference_receiver,
                                     session_id);
     canfd_accepted_reference_order = 0UL;
@@ -553,11 +615,7 @@ static void canfd_parse_command(const canfd_frame_t *frame)
                       CANFD_RESULT_BUSY, 0U);
     return;
   }
-  canfd_last_command_sequence = command_id;
-  canfd_last_command_session = session_id;
-  memcpy(canfd_last_command_payload, frame->data, 32U);
-  canfd_last_command_valid = 1U;
-  canfd_last_result_valid = 0U;
+  canfd_cache_command(frame, command_id, session_id);
 
   if((frame->data[9] != 0U) || (canfd_get_u16(&frame->data[10]) != 0U))
   {

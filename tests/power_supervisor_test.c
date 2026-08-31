@@ -66,6 +66,20 @@ static void test_invalid_and_unapproved_config(void)
                POWER_FAULT_CONFIG_INVALID) != 0U,
               "unobservable voltage threshold fails closed");
 
+  config = test_config(1U);
+  config.left_current_ua_per_count = 1053721122UL;
+  power_supervisor_init(&config);
+  expect_true((power_supervisor_get_fault_mask() &
+               POWER_FAULT_CONFIG_INVALID) != 0U,
+              "full-scale current conversion cannot overflow uint32");
+
+  config = test_config(1U);
+  config.left_current_ua_per_count = 1049000000UL;
+  power_supervisor_init(&config);
+  expect_true((power_supervisor_get_fault_mask() &
+               POWER_FAULT_CONFIG_INVALID) != 0U,
+              "full-scale check rejects gain inside reduced-window gap");
+
   config = test_config(0U);
   power_supervisor_init(&config);
   calibrate(10U, 10U);
