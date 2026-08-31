@@ -23,20 +23,24 @@
 #include "motion_command.h"
 #include "motor_speed_control.h"
 #include "serial_motion_protocol.h"
+#include "system_watchdog.h"
 
 #define APP_CONTROL_TASK_PRIORITY                5U
 #define APP_SERIAL_TASK_PRIORITY                 3U
 #define APP_CANFD_TASK_PRIORITY                  3U
 #define APP_DOCK_TASK_PRIORITY                   2U
+#define APP_WATCHDOG_TASK_PRIORITY               1U
 #define APP_CONTROL_TASK_STACK_WORDS          1024U
 #define APP_SERIAL_TASK_STACK_WORDS            512U
 #define APP_CANFD_TASK_STACK_WORDS             768U
 #define APP_DOCK_TASK_STACK_WORDS             2048U
+#define APP_WATCHDOG_TASK_STACK_WORDS           256U
 #define APP_COMMAND_QUEUE_LENGTH                  8U
 #define APP_CONTROL_PERIOD_MS                    10U
 #define APP_SERIAL_POLL_PERIOD_MS                 2U
 #define APP_CANFD_POLL_PERIOD_MS                  2U
 #define APP_DOCK_SAMPLE_PERIOD_MS                 5U
+#define APP_WATCHDOG_PERIOD_MS                   20U
 #define APP_PRIORITY_COMMAND_COUNT                4U
 
 #define APP_PRIORITY_ESTOP_INDEX                  0U
@@ -66,6 +70,10 @@ static StaticTask_t app_dock_task_storage;
 static StackType_t app_dock_task_stack[APP_DOCK_TASK_STACK_WORDS];
 static TaskHandle_t app_dock_task_handle;
 
+static StaticTask_t app_watchdog_task_storage;
+static StackType_t app_watchdog_task_stack[APP_WATCHDOG_TASK_STACK_WORDS];
+static TaskHandle_t app_watchdog_task_handle;
+
 static StaticQueue_t app_command_queue_storage;
 static uint8_t app_command_queue_buffer[
     APP_COMMAND_QUEUE_LENGTH * sizeof(app_queued_motion_command_t)];
@@ -74,6 +82,8 @@ static QueueHandle_t app_command_queue;
 static motion_command_t app_priority_commands[APP_PRIORITY_COMMAND_COUNT];
 static volatile uint8_t app_priority_pending_mask;
 static volatile uint32_t app_safety_epoch;
+static volatile uint32_t app_control_generation;
+static volatile uint32_t app_can_generation;
 
 static StaticTask_t app_idle_task_storage;
 static StackType_t app_idle_task_stack[configMINIMAL_STACK_SIZE];
@@ -229,6 +239,7 @@ static void app_control_task(void *parameter)
     }
 
     chassis_motion_controller_step_10ms();
+    app_control_generation++;
   }
 }
 
@@ -242,8 +253,28 @@ static void app_canfd_task(void *parameter)
     dock_ir_receiver_sample_2ms();
     canfd_protocol_poll(
         (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS));
+    app_can_generation++;
     vTaskDelayUntil(&last_wake_tick,
                     pdMS_TO_TICKS(APP_CANFD_POLL_PERIOD_MS));
+  }
+}
+
+static void app_watchdog_task(void *parameter)
+{
+  system_watchdog_health_t health = {0};
+  TickType_t last_wake_tick = xTaskGetTickCount();
+
+  (void)parameter;
+  for(;;)
+  {
+    vTaskDelayUntil(&last_wake_tick,
+                    pdMS_TO_TICKS(APP_WATCHDOG_PERIOD_MS));
+    if(system_watchdog_health_step(&health,
+                                   app_control_generation,
+                                   app_can_generation) != 0U)
+    {
+      system_watchdog_feed();
+    }
   }
 }
 
@@ -364,6 +395,8 @@ uint8_t app_freertos_init(void)
   vQueueAddToRegistry(app_command_queue, "MotionCmdQ");
   app_priority_pending_mask = 0U;
   app_safety_epoch = 1UL;
+  app_control_generation = 0UL;
+  app_can_generation = 0UL;
   serial_motion_protocol_init(app_submit_motion_command,
                               app_command_queue);
   canfd_protocol_init(app_submit_motion_command,
@@ -401,11 +434,21 @@ uint8_t app_freertos_init(void)
       APP_DOCK_TASK_PRIORITY,
       app_dock_task_stack,
       &app_dock_task_storage);
+  app_watchdog_task_handle = xTaskCreateStatic(
+      app_watchdog_task,
+      "Watchdog",
+      APP_WATCHDOG_TASK_STACK_WORDS,
+      NULL,
+      APP_WATCHDOG_TASK_PRIORITY,
+      app_watchdog_task_stack,
+      &app_watchdog_task_storage);
 
   if((app_control_task_handle == NULL) ||
      (app_serial_task_handle == NULL) ||
      (app_canfd_task_handle == NULL) ||
-     (app_dock_task_handle == NULL))
+     (app_dock_task_handle == NULL) ||
+     (app_watchdog_task_handle == NULL) ||
+     (system_watchdog_init() == 0U))
   {
     return 0U;
   }

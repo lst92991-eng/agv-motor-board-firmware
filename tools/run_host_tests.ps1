@@ -23,8 +23,7 @@ function Invoke-CHostTest {
     [string]$Name,
     [Parameter(Mandatory = $true)]
     [string]$TestRelativePath,
-    [Parameter(Mandatory = $true)]
-    [string[]]$ModuleRelativePath
+    [string[]]$ModuleRelativePath = @()
   )
 
   $testSource = Join-Path $repoRoot $TestRelativePath
@@ -66,3 +65,7 @@ Invoke-CHostTest `
   -TestRelativePath 'tests\serial_motion_protocol_test.c' `
   -ModuleRelativePath 'src\serial_motion_protocol.c', `
                       'src\motion_command.c'
+Invoke-CHostTest `
+  -Name 'system_watchdog_test' `
+  -TestRelativePath 'tests\system_watchdog_test.c' `
+  -ModuleRelativePath @()

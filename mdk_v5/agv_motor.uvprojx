@@ -404,6 +404,11 @@
               <FilePath>..\src\app_freertos.c</FilePath>
             </File>
             <File>
+              <FileName>system_watchdog.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\system_watchdog.c</FilePath>
+            </File>
+            <File>
               <FileName>debug_uart_log.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\debug_uart_log.c</FilePath>
@@ -622,6 +627,11 @@
               <FileName>at32f45x_can.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\libraries\drivers\src\at32f45x_can.c</FilePath>
+            </File>
+            <File>
+              <FileName>at32f45x_wdt.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\libraries\drivers\src\at32f45x_wdt.c</FilePath>
             </File>
             <File>
               <FileName>at32f45x_crm.c</FileName>
