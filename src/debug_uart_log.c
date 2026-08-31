@@ -1,7 +1,7 @@
 /**
   *****************************************************************************
   * @file     debug_uart_log.c
-  * @brief    FreeRTOS任务间共享的串口输出互斥封装
+  * @brief    不阻塞控制任务的格式化日志入队
   *****************************************************************************
   */
 
@@ -10,42 +10,27 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "FreeRTOS.h"
-#include "semphr.h"
-#include "task.h"
+#include "debug_uart_transport.h"
 
-static StaticSemaphore_t debug_uart_log_mutex_storage;
-static SemaphoreHandle_t debug_uart_log_mutex;
+#define DEBUG_UART_LOG_MESSAGE_SIZE 256U
 
 void debug_uart_log_init(void)
 {
-  debug_uart_log_mutex = xSemaphoreCreateMutexStatic(
-      &debug_uart_log_mutex_storage);
-  configASSERT(debug_uart_log_mutex != NULL);
 }
 
 int debug_uart_log_printf(const char *format, ...)
 {
   va_list arguments;
   int result;
-  uint8_t mutex_locked = 0U;
-
-  if((debug_uart_log_mutex != NULL) &&
-     (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING))
-  {
-    if(xSemaphoreTake(debug_uart_log_mutex, portMAX_DELAY) == pdPASS)
-    {
-      mutex_locked = 1U;
-    }
-  }
+  char message[DEBUG_UART_LOG_MESSAGE_SIZE];
 
   va_start(arguments, format);
-  result = vprintf(format, arguments);
+  result = vsnprintf(message, sizeof(message), format, arguments);
   va_end(arguments);
-
-  if(mutex_locked != 0U)
+  if((result <= 0) || ((uint32_t)result >= sizeof(message)))
   {
-    (void)xSemaphoreGive(debug_uart_log_mutex);
+    return -1;
   }
-  return result;
+  return (debug_uart_transport_write((const uint8_t *)message,
+                                     (uint16_t)result) != 0U) ? result : 0;
 }

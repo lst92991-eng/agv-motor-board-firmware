@@ -39,6 +39,9 @@ int16_t imu_heading_get_linear_accel_z_mg(void);
 /* 返回最近一次初始化或采样结果。 */
 int8_t imu_heading_get_status(void);
 
+/* 返回自最近一次真实GYR DRDY样本以来的本地累计时间。 */
+uint16_t imu_heading_get_gyro_age_ms(void);
+
 #ifdef __cplusplus
 }
 #endif

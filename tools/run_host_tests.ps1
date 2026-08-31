@@ -61,3 +61,8 @@ Invoke-CHostTest `
   -TestRelativePath 'tests\motion_reference_test.c' `
   -ModuleRelativePath 'src\motion_reference_receiver.c', `
                       'src\motion_reference_control.c'
+Invoke-CHostTest `
+  -Name 'serial_motion_protocol_test' `
+  -TestRelativePath 'tests\serial_motion_protocol_test.c' `
+  -ModuleRelativePath 'src\serial_motion_protocol.c', `
+                      'src\motion_command.c'

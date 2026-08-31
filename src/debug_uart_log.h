@@ -5,10 +5,10 @@
 extern "C" {
 #endif
 
-/* 创建静态串口输出互斥锁，调度器启动前调用。 */
+/* 保留统一初始化入口；实现不创建锁或任务。 */
 void debug_uart_log_init(void);
 
-/* 以互斥方式输出一条格式化日志，避免不同任务的串口内容交叉。 */
+/* 格式化后整条入队；队列满或消息过长时立即返回，不等待硬件。 */
 int debug_uart_log_printf(const char *format, ...);
 
 #ifdef __cplusplus

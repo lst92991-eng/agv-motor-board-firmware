@@ -41,6 +41,7 @@
 #define IMU_HEADING_DEADBAND_MAX_DPS              0.30f
 #define IMU_HEADING_CALIB_MAX_SIGMA_DPS            1.00f
 #define IMU_HEADING_YAW_SIGN                         1.0f
+#define IMU_HEADING_GYRO_STALE_LIMIT_MS               50U
 
 static uint8_t imu_heading_spi_mode3;
 static uint8_t imu_heading_read_dummy = 1U;
@@ -65,6 +66,7 @@ static float imu_heading_raw_rate_dps;
 static float imu_heading_filtered_rate_dps;
 static float imu_heading_noise_sigma_dps;
 static float imu_heading_deadband_dps;
+static uint16_t imu_heading_gyro_age_ms;
 
 static float imu_heading_abs_float(float value)
 {
@@ -575,6 +577,7 @@ int8_t imu_heading_init(void)
   }
 
   imu_heading_status = result;
+  imu_heading_gyro_age_ms = 0U;
   return result;
 }
 
@@ -588,6 +591,7 @@ int8_t imu_heading_update(float dt_s)
   float rate_delta_dps;
   float limited_rate_dps;
   float filter_alpha;
+  uint32_t elapsed_ms;
 
   if(imu_heading_status != BMI2_OK)
   {
@@ -603,6 +607,7 @@ int8_t imu_heading_update(float dt_s)
 
   if((sensor_data.status & BMI2_DRDY_GYR) != 0U)
   {
+    imu_heading_gyro_age_ms = 0U;
     gyro_x_dps = imu_heading_raw_to_dps(sensor_data.gyr.x) -
                  imu_heading_gyro_x_zero_dps;
     gyro_y_dps = imu_heading_raw_to_dps(sensor_data.gyr.y) -
@@ -650,6 +655,25 @@ int8_t imu_heading_update(float dt_s)
       imu_heading_yaw_deg += 360.0f;
     }
   }
+  else
+  {
+    /* Never integrate or reuse a rate sample whose DRDY bit did not advance. */
+    elapsed_ms = (uint32_t)((dt_s * 1000.0f) + 0.5f);
+    if(elapsed_ms == 0U)
+    {
+      elapsed_ms = 1U;
+    }
+    if((uint32_t)imu_heading_gyro_age_ms + elapsed_ms > 65535UL)
+    {
+      imu_heading_gyro_age_ms = 65535U;
+    }
+    else
+    {
+      imu_heading_gyro_age_ms = (uint16_t)(
+          (uint32_t)imu_heading_gyro_age_ms + elapsed_ms);
+    }
+    imu_heading_rate_dps = 0.0f;
+  }
 
   if((sensor_data.status & BMI2_DRDY_ACC) != 0U)
   {
@@ -661,6 +685,11 @@ int8_t imu_heading_update(float dt_s)
         sensor_data.acc.z, imu_heading_gravity_z_raw);
   }
 
+  if(imu_heading_gyro_age_ms >= IMU_HEADING_GYRO_STALE_LIMIT_MS)
+  {
+    imu_heading_status = BMI2_E_DATA_RDY_INT_FAILED;
+    return imu_heading_status;
+  }
   return BMI2_OK;
 }
 
@@ -712,4 +741,9 @@ int16_t imu_heading_get_linear_accel_z_mg(void)
 int8_t imu_heading_get_status(void)
 {
   return imu_heading_status;
+}
+
+uint16_t imu_heading_get_gyro_age_ms(void)
+{
+  return imu_heading_gyro_age_ms;
 }

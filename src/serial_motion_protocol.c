@@ -1,14 +1,13 @@
 /**
   *****************************************************************************
   * @file     serial_motion_protocol.c
-  * @brief    调试串口运动命令解析与ACK应答
+  * @brief    维护串口紧急停车命令解析与ACK应答
   *****************************************************************************
   */
 
 #include "serial_motion_protocol.h"
 
 #include <errno.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +16,7 @@
 #include "debug_uart_transport.h"
 
 #define SERIAL_MOTION_LINE_SIZE                 192U
-#define SERIAL_MOTION_MAX_FIELDS                 10U
+#define SERIAL_MOTION_MAX_FIELDS                  4U
 
 static char serial_motion_line[SERIAL_MOTION_LINE_SIZE];
 static uint16_t serial_motion_line_length;
@@ -135,7 +134,7 @@ static void serial_motion_parse_line(char *line)
 
   field_count = serial_motion_split_fields(line, fields,
                                            SERIAL_MOTION_MAX_FIELDS);
-  if((field_count < 4U) || (strcmp(fields[0], "CMD") != 0))
+  if((field_count != 4U) || (strcmp(fields[0], "CMD") != 0))
   {
     serial_motion_send_ack(0U, "UNKNOWN", "REJECTED",
                            MOTION_COMMAND_ERROR_FORMAT);
@@ -158,90 +157,17 @@ static void serial_motion_parse_line(char *line)
   }
   command.sequence = (uint32_t)parsed_value;
 
-  if(strcmp(fields[1], "GOTO") == 0)
+  if(strcmp(fields[1], "STOP") == 0)
   {
-    if(field_count != 8U)
-    {
-      serial_motion_send_ack(command.sequence, "GOTO", "REJECTED",
-                             MOTION_COMMAND_ERROR_FORMAT);
-      return;
-    }
-    command.type = MOTION_CMD_GOTO_LOCAL;
-    if((serial_motion_parse_long(fields[4], INT_MIN, INT_MAX,
-                                 &parsed_value) == 0U))
-    {
-      serial_motion_send_ack(command.sequence, "GOTO", "REJECTED",
-                             MOTION_COMMAND_ERROR_FORMAT);
-      return;
-    }
-    command.data.goto_local.x_mm = (int32_t)parsed_value;
-    if((serial_motion_parse_long(fields[5], INT_MIN, INT_MAX,
-                                 &parsed_value) == 0U))
-    {
-      serial_motion_send_ack(command.sequence, "GOTO", "REJECTED",
-                             MOTION_COMMAND_ERROR_FORMAT);
-      return;
-    }
-    command.data.goto_local.y_mm = (int32_t)parsed_value;
-    if((serial_motion_parse_long(fields[6], INT_MIN, INT_MAX,
-                                 &parsed_value) == 0U))
-    {
-      serial_motion_send_ack(command.sequence, "GOTO", "REJECTED",
-                             MOTION_COMMAND_ERROR_FORMAT);
-      return;
-    }
-    command.data.goto_local.yaw_cdeg = (int32_t)parsed_value;
-    if((serial_motion_parse_long(fields[7], 0L, 65535L,
-                                 &parsed_value) == 0U))
-    {
-      serial_motion_send_ack(command.sequence, "GOTO", "REJECTED",
-                             MOTION_COMMAND_ERROR_FORMAT);
-      return;
-    }
-    command.data.goto_local.speed_mm_s = (uint16_t)parsed_value;
-  }
-  else if(strcmp(fields[1], "STOP") == 0)
-  {
-    if(field_count != 4U)
-    {
-      serial_motion_send_ack(command.sequence, "STOP", "REJECTED",
-                             MOTION_COMMAND_ERROR_FORMAT);
-      return;
-    }
     command.type = MOTION_CMD_STOP;
   }
   else if(strcmp(fields[1], "ESTOP") == 0)
   {
-    if(field_count != 4U)
-    {
-      serial_motion_send_ack(command.sequence, "ESTOP", "REJECTED",
-                             MOTION_COMMAND_ERROR_FORMAT);
-      return;
-    }
     command.type = MOTION_CMD_ESTOP;
-  }
-  else if(strcmp(fields[1], "RESET_ODOM") == 0)
-  {
-    if(field_count != 4U)
-    {
-      serial_motion_send_ack(command.sequence, "RESET_ODOM", "REJECTED",
-                             MOTION_COMMAND_ERROR_FORMAT);
-      return;
-    }
-    command.type = MOTION_CMD_RESET_ODOM;
-  }
-  else if(strcmp(fields[1], "CLEAR_FAULT") == 0)
-  {
-    if(field_count != 4U)
-    {
-      serial_motion_send_ack(command.sequence, "CLEAR_FAULT", "REJECTED",
-                             MOTION_COMMAND_ERROR_FORMAT);
-      return;
-    }
-    command.type = MOTION_CMD_CLEAR_FAULT;
   }
   else
   {
+    /* Production UART never grants motion, reset or fault-clear authority. */
     serial_motion_send_ack(command.sequence, fields[1], "REJECTED",
                            MOTION_COMMAND_ERROR_UNSUPPORTED);
     return;
