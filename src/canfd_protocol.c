@@ -435,7 +435,8 @@ static uint8_t canfd_submit_command(motion_command_t *command,
       canfd_comm_timeout_reported = 0U;
     }
     else if((command->type == MOTION_CMD_ESTOP) ||
-            (command->type == MOTION_CMD_DISABLE))
+            (command->type == MOTION_CMD_DISABLE) ||
+            (command->type == MOTION_CMD_RELEASE))
     {
       motion_reference_receiver_invalidate_latest(
           &canfd_motion_reference_receiver);
@@ -614,7 +615,7 @@ static void canfd_parse_command(const canfd_frame_t *frame)
   command.source = MOTION_SOURCE_CANFD;
   if(command_code == CANFD_COMMAND_RELEASE_CONTROL)
   {
-    command.type = MOTION_CMD_DISABLE;
+    command.type = MOTION_CMD_RELEASE;
   }
   else if(command_code == CANFD_COMMAND_ENABLE_MOTION)
   {
@@ -691,14 +692,6 @@ static void canfd_parse_command(const canfd_frame_t *frame)
     return;
   }
   (void)canfd_submit_command(&command, session_required);
-  if((command_code == CANFD_COMMAND_RELEASE_CONTROL) &&
-     (session_id == canfd_host_session))
-  {
-    canfd_session_valid = 0U;
-    canfd_motion_session_active = 0U;
-    motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
-    canfd_accepted_velocity_order = 0UL;
-  }
 }
 
 static void canfd_parse_lease(const canfd_frame_t *frame)
@@ -1334,6 +1327,14 @@ void canfd_protocol_send_motion_result(
       canfd_send_result(command->sequence, command->session_id,
                         CANFD_RESULT_STAGE_SUCCEEDED,
                         CANFD_RESULT_OK, 0U);
+    }
+    if(motion_command_releases_session(command->type, result) != 0U)
+    {
+      canfd_session_valid = 0U;
+      canfd_motion_session_active = 0U;
+      canfd_lease_counter_valid = 0U;
+      motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
+      canfd_accepted_velocity_order = 0UL;
     }
   }
 }

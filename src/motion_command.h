@@ -27,7 +27,8 @@ typedef enum
   MOTION_CMD_COMM_TIMEOUT = 8,
   MOTION_CMD_CAN_BUSOFF = 9,
   MOTION_CMD_ENABLE = 10,
-  MOTION_CMD_DISABLE = 11
+  MOTION_CMD_DISABLE = 11,
+  MOTION_CMD_RELEASE = 12
 } motion_command_type_t;
 
 typedef enum
@@ -96,6 +97,11 @@ motion_command_error_t motion_command_validate(const motion_command_t *command);
 
 /* 返回统一命令的固定英文名称，供串口ACK和日志使用。 */
 const char *motion_command_get_name(motion_command_type_t type);
+
+/* 只有控制任务确认RELEASE已执行后，协议层才撤销session。 */
+uint8_t motion_command_releases_session(
+    motion_command_type_t type,
+    motion_command_handle_result_t result);
 
 #ifdef __cplusplus
 }

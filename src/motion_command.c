@@ -77,7 +77,8 @@ motion_command_error_t motion_command_validate(const motion_command_t *command)
           (command->type != MOTION_CMD_COMM_TIMEOUT) &&
           (command->type != MOTION_CMD_CAN_BUSOFF) &&
           (command->type != MOTION_CMD_ENABLE) &&
-          (command->type != MOTION_CMD_DISABLE))
+          (command->type != MOTION_CMD_DISABLE) &&
+          (command->type != MOTION_CMD_RELEASE))
   {
     return MOTION_COMMAND_ERROR_UNSUPPORTED;
   }
@@ -109,7 +110,17 @@ const char *motion_command_get_name(motion_command_type_t type)
       return "ENABLE";
     case MOTION_CMD_DISABLE:
       return "DISABLE";
+    case MOTION_CMD_RELEASE:
+      return "RELEASE";
     default:
       return "UNKNOWN";
   }
+}
+
+uint8_t motion_command_releases_session(
+    motion_command_type_t type,
+    motion_command_handle_result_t result)
+{
+  return ((type == MOTION_CMD_RELEASE) &&
+          (result == MOTION_HANDLE_ACCEPTED)) ? 1U : 0U;
 }

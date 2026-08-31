@@ -111,10 +111,27 @@ static void test_active_and_reset_commands_are_rejected(void)
   }
 }
 
+static void test_session_release_requires_control_confirmation(void)
+{
+  expect_true(motion_command_releases_session(
+                  MOTION_CMD_RELEASE, MOTION_HANDLE_RECEIVED) == 0U,
+              "queued release does not close session early");
+  expect_true(motion_command_releases_session(
+                  MOTION_CMD_RELEASE, MOTION_HANDLE_BUSY) == 0U,
+              "busy release keeps session protection");
+  expect_true(motion_command_releases_session(
+                  MOTION_CMD_RELEASE, MOTION_HANDLE_ACCEPTED) != 0U,
+              "accepted release closes session");
+  expect_true(motion_command_releases_session(
+                  MOTION_CMD_DISABLE, MOTION_HANDLE_ACCEPTED) == 0U,
+              "disable keeps the owned session");
+}
+
 int main(void)
 {
   test_emergency_commands_are_allowed();
   test_active_and_reset_commands_are_rejected();
+  test_session_release_requires_control_confirmation();
   if(failures != 0)
   {
     printf("SERIAL_MOTION_PROTOCOL_TEST_FAIL,%d\n", failures);

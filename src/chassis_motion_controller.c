@@ -1502,7 +1502,8 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     return MOTION_HANDLE_ACCEPTED;
   }
 
-  if(command->type == MOTION_CMD_DISABLE)
+  if((command->type == MOTION_CMD_DISABLE) ||
+     (command->type == MOTION_CMD_RELEASE))
   {
     chassis_cancel_active_task();
     chassis_clear_motion_reference();
