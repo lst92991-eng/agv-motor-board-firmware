@@ -1,6 +1,6 @@
 # AGV 电机驱动板 CAN FD 历史协议 V1（已弃用）
 
-> 本文件仅保留 2026-08-11 单板联调时使用的历史私有协议，不能再用于配置当前整车或上位机。当前固件遵循 [`AGV_CANopen_FD_Protocol_V0.1.md`](../../../docs/AGV_CANopen_FD_Protocol_V0.1.md)，总线参数为仲裁段 500 kbit/s、数据段 4 Mbit/s、开启 BRS；整车静态验证见 [`canfd_vehicle_4m_validation_2026-08-15.md`](canfd_vehicle_4m_validation_2026-08-15.md)，500 kbit/s / 1 Mbit/s 记录仍作为回退基线。
+> 本文件仅保留 2026-08-11 单板联调时使用的历史私有协议，不能再用于配置当前整车或上位机。当前固件遵循 [`AGV_CANopen_FD_Protocol_V0.2.md`](../../../docs/AGV_CANopen_FD_Protocol_V0.2.md)，总线参数为仲裁段 500 kbit/s、数据段 4 Mbit/s、开启 BRS；整车静态验证见 [`canfd_vehicle_4m_validation_2026-08-15.md`](canfd_vehicle_4m_validation_2026-08-15.md)，500 kbit/s / 1 Mbit/s 记录仍作为回退基线。
 
 联调通过记录见 [`canfd_motor_integration_test_2026-08-11.md`](canfd_motor_integration_test_2026-08-11.md)。
 

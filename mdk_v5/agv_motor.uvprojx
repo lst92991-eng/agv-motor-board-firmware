@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>AT32F456RCT7,USE_STDPERIPH_DRIVER,AT_START_F456_V1,USE_FREERTOS,USE_I2C_2V8</Define>
               <Undefine></Undefine>
-              <IncludePath>..\src;..\libraries\drivers\inc;..\libraries\cmsis\cm4\core_support;..\libraries\cmsis\cm4\device_support;..\inc;..\at32f45x_board;..\third_party\bosch_bmi270;..\third_party\st_vl53l0x;..\third_party\freertos\include;..\third_party\freertos\portable\rvds\ARM_CM4F</IncludePath>
+              <IncludePath>..\src;..\..\agv-motion-contract\include;..\libraries\drivers\inc;..\libraries\cmsis\cm4\core_support;..\libraries\cmsis\cm4\device_support;..\inc;..\at32f45x_board;..\third_party\bosch_bmi270;..\third_party\st_vl53l0x;..\third_party\freertos\include;..\third_party\freertos\portable\rvds\ARM_CM4F</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -412,6 +412,16 @@
               <FileName>motion_command.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\motion_command.c</FilePath>
+            </File>
+            <File>
+              <FileName>motion_reference_receiver.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motion_reference_receiver.c</FilePath>
+            </File>
+            <File>
+              <FileName>motion_reference_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\motion_reference_control.c</FilePath>
             </File>
             <File>
               <FileName>debug_uart_transport.c</FileName>

@@ -20,6 +20,7 @@
 #include "at32f45x_gpio.h"
 #include "at32f45x_misc.h"
 #include "canfd_status_codec.h"
+#include "motion_reference_receiver.h"
 
 #define CANFD_BITTIME_DIV                         2U
 /* 192 MHz PCLK CAN clock: both phases sample at 75%; arbitration/data SJW
@@ -129,6 +130,7 @@ static uint32_t canfd_tx_started_ms;
 static canfd_tx_queue_t *canfd_tx_active_queue;
 static canfd_magnetic_sample_t canfd_magnetic_sample;
 static volatile uint32_t canfd_magnetic_generation;
+static motion_reference_receiver_t canfd_motion_reference_receiver;
 
 static uint8_t canfd_dlc_to_size(can_data_length_type data_length)
 {
@@ -427,7 +429,14 @@ static uint8_t canfd_submit_command(motion_command_t *command,
     else if((command->type == MOTION_CMD_ESTOP) ||
             (command->type == MOTION_CMD_DISABLE))
     {
+      motion_reference_receiver_invalidate_latest(
+          &canfd_motion_reference_receiver);
       canfd_motion_session_active = 0U;
+    }
+    else if(command->type == MOTION_CMD_STOP)
+    {
+      motion_reference_receiver_invalidate_latest(
+          &canfd_motion_reference_receiver);
     }
     canfd_send_ack(command->sequence, command->session_id, command->type,
                    (result == MOTION_HANDLE_RECEIVED) ?
@@ -491,6 +500,8 @@ static void canfd_accept_claim(uint32_t command_id,
                                uint32_t session_id,
                                int32_t requested_lease_ms)
 {
+  uint8_t new_session;
+
   if((session_id == 0UL) ||
      (requested_lease_ms < (int32_t)CANFD_LEASE_MIN_MS) ||
      (requested_lease_ms > (int32_t)CANFD_LEASE_MAX_MS))
@@ -507,10 +518,14 @@ static void canfd_accept_claim(uint32_t command_id,
                       CANFD_RESULT_BUSY, 0U);
     return;
   }
-  if(session_id != canfd_host_session)
+  new_session = ((canfd_session_valid == 0U) ||
+                 (session_id != canfd_host_session)) ? 1U : 0U;
+  if(new_session != 0U)
   {
     canfd_last_command_sequence = command_id;
     canfd_last_command_session = session_id;
+    motion_reference_receiver_reset(&canfd_motion_reference_receiver,
+                                    session_id);
   }
   canfd_host_session = session_id;
   canfd_session_valid = 1U;
@@ -683,6 +698,7 @@ static void canfd_parse_command(const canfd_frame_t *frame)
   {
     canfd_session_valid = 0U;
     canfd_motion_session_active = 0U;
+    motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
   }
 }
 
@@ -723,21 +739,32 @@ static void canfd_parse_lease(const canfd_frame_t *frame)
 
 static void canfd_parse_velocity(const canfd_frame_t *frame)
 {
-  uint32_t session_id;
-  uint16_t validity_ms;
+  uint32_t elapsed_ms;
+  uint16_t lease_remaining_ms;
 
-  if(frame->data_size != 16U)
+  if((frame->data_size != AGV_MOTION_REFERENCE_PAYLOAD_SIZE) ||
+     (canfd_session_valid == 0U) ||
+     (canfd_motion_session_active == 0U))
   {
     return;
   }
-  session_id = canfd_get_u32(&frame->data[0]);
-  validity_ms = canfd_get_u16(&frame->data[6]);
-  if((canfd_session_matches(session_id) == 0U) ||
-     (validity_ms < 50U) || (validity_ms > 500U))
+  elapsed_ms = canfd_now_ms - canfd_last_lease_ms;
+  if(elapsed_ms >= (uint32_t)canfd_lease_duration_ms)
   {
     return;
   }
-  /* 当前固件不公布速度流能力，收到预留RPDO时保持现有安全输出。 */
+  lease_remaining_ms = (uint16_t)((uint32_t)canfd_lease_duration_ms -
+                                  elapsed_ms);
+  (void)motion_reference_receiver_accept(
+      &canfd_motion_reference_receiver,
+      frame->data,
+      (uint16_t)frame->data_size,
+      canfd_now_ms,
+      lease_remaining_ms);
+  /*
+   * The session/sequence/TTL receiver is ready, but the chassis deliberately
+   * does not consume this reference or publish velocity capability before G3.
+   */
 }
 
 static void canfd_parse_magnetic(const canfd_frame_t *frame)
@@ -900,6 +927,8 @@ static void canfd_check_timeouts_and_bus(void)
   {
     if(canfd_busoff_reported == 0U)
     {
+      motion_reference_receiver_invalidate_latest(
+          &canfd_motion_reference_receiver);
       canfd_busoff_reported = 1U;
       canfd_submit_internal_fault(MOTION_CMD_CAN_BUSOFF);
     }
@@ -917,11 +946,12 @@ static void canfd_check_timeouts_and_bus(void)
   }
 
   if((canfd_session_valid != 0U) &&
-     ((canfd_now_ms - canfd_last_lease_ms) >
+     ((canfd_now_ms - canfd_last_lease_ms) >=
       (uint32_t)canfd_lease_duration_ms))
   {
     canfd_session_valid = 0U;
     canfd_lease_counter_valid = 0U;
+    motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
     if((canfd_motion_session_active != 0U) &&
        (canfd_comm_timeout_reported == 0U))
     {
@@ -1103,6 +1133,7 @@ void canfd_protocol_init(motion_command_handler_t handler, void *context)
   canfd_tx_active_queue = NULL;
   memset(&canfd_magnetic_sample, 0, sizeof(canfd_magnetic_sample));
   canfd_magnetic_generation = 0UL;
+  motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
   canfd_hardware_init();
 }
 
@@ -1435,4 +1466,17 @@ uint8_t canfd_protocol_get_magnetic_sample(
     }
   }
   return 0U;
+}
+
+uint8_t canfd_protocol_get_motion_reference(
+    agv_motion_reference_t *reference)
+{
+  if((canfd_session_valid == 0U) ||
+     (canfd_motion_session_active == 0U) ||
+     (CAN3->ctrlstat_bit.busoff != 0U))
+  {
+    return 0U;
+  }
+  return motion_reference_receiver_get_latest(
+      &canfd_motion_reference_receiver, canfd_now_ms, reference);
 }

@@ -14,6 +14,8 @@ if($null -eq $vcvarsPath) {
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $includePath = Join-Path $repoRoot 'src'
+$contractIncludePath = (Resolve-Path -LiteralPath `
+    (Join-Path $repoRoot '..\agv-motion-contract\include')).Path
 
 function Invoke-CHostTest {
   param(
@@ -22,15 +24,19 @@ function Invoke-CHostTest {
     [Parameter(Mandatory = $true)]
     [string]$TestRelativePath,
     [Parameter(Mandatory = $true)]
-    [string]$ModuleRelativePath
+    [string[]]$ModuleRelativePath
   )
 
   $testSource = Join-Path $repoRoot $TestRelativePath
-  $moduleSource = Join-Path $repoRoot $ModuleRelativePath
+  $moduleSources = $ModuleRelativePath | ForEach-Object {
+    '"{0}"' -f (Join-Path $repoRoot $_)
+  }
+  $moduleArguments = $moduleSources -join ' '
   $testExecutable = Join-Path ([IO.Path]::GetTempPath()) `
     ("agv_{0}.exe" -f $Name)
-  $command = 'call "{0}" >nul && cl /nologo /W4 /WX /utf-8 /TC "{1}" "{2}" /I "{3}" /Fe:"{4}" && "{4}"' -f `
-    $vcvarsPath, $testSource, $moduleSource, $includePath, $testExecutable
+  $command = 'call "{0}" >nul && cl /nologo /W4 /WX /utf-8 /TC "{1}" {2} /I "{3}" /I "{4}" /Fe:"{5}" && "{5}"' -f `
+    $vcvarsPath, $testSource, $moduleArguments, $includePath, `
+    $contractIncludePath, $testExecutable
 
   & $env:ComSpec /d /c $command
   if($LASTEXITCODE -ne 0) {
@@ -50,3 +56,8 @@ Invoke-CHostTest `
   -Name 'canfd_status_codec_test' `
   -TestRelativePath 'tests\canfd_status_codec_test.c' `
   -ModuleRelativePath 'src\canfd_status_codec.c'
+Invoke-CHostTest `
+  -Name 'motion_reference_test' `
+  -TestRelativePath 'tests\motion_reference_test.c' `
+  -ModuleRelativePath 'src\motion_reference_receiver.c', `
+                      'src\motion_reference_control.c'

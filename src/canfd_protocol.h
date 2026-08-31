@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "agv/motion_contract.h"
 #include "motion_command.h"
 
 #ifdef __cplusplus
@@ -18,7 +19,7 @@ extern "C" {
 #define CANFD_ID_COMMAND_RESULT              0x281U
 #define CANFD_ID_CONTROL_LEASE               0x301U
 #define CANFD_ID_ODOM_STATUS                 0x381U
-#define CANFD_ID_VELOCITY                    0x401U
+#define CANFD_ID_VELOCITY                    AGV_CAN_ID_MOTION_REFERENCE
 #define CANFD_ID_SAFETY_STATUS               0x481U
 #define CANFD_ID_MOTOR_DIAGNOSTIC             0x581U
 #define CANFD_ID_DOCK_STATUS                  0x582U
@@ -204,6 +205,13 @@ uint32_t canfd_protocol_get_tx_drop_count(void);
 /* 获取磁导航最新快照；返回0表示尚未收到合法长度的0x182帧。 */
 uint8_t canfd_protocol_get_magnetic_sample(
     canfd_magnetic_sample_t *sample);
+
+/*
+ * Return the newest accepted 0x401 reference while its effective TTL is
+ * fresh. The chassis does not consume this reference until the G3 gate.
+ */
+uint8_t canfd_protocol_get_motion_reference(
+    agv_motion_reference_t *reference);
 
 #ifdef __cplusplus
 }
