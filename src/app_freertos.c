@@ -15,22 +15,28 @@
 #include "queue.h"
 #include "task.h"
 
+#include "adc_monitor.h"
 #include "chassis_motion_controller.h"
 #include "canfd_protocol.h"
 #include "debug_uart_log.h"
 #include "dock_ir_receiver.h"
 #include "dock_tof_sensor.h"
 #include "motion_command.h"
+#include "motor_current.h"
+#include "motor_encoder.h"
 #include "motor_speed_control.h"
+#include "power_supervisor.h"
 #include "serial_motion_protocol.h"
 #include "system_watchdog.h"
 
 #define APP_CONTROL_TASK_PRIORITY                5U
+#define APP_POWER_TASK_PRIORITY                  2U
 #define APP_SERIAL_TASK_PRIORITY                 3U
 #define APP_CANFD_TASK_PRIORITY                  3U
 #define APP_DOCK_TASK_PRIORITY                   2U
 #define APP_WATCHDOG_TASK_PRIORITY               1U
 #define APP_CONTROL_TASK_STACK_WORDS          1024U
+#define APP_POWER_TASK_STACK_WORDS             256U
 #define APP_SERIAL_TASK_STACK_WORDS            512U
 #define APP_CANFD_TASK_STACK_WORDS             768U
 #define APP_DOCK_TASK_STACK_WORDS             2048U
@@ -41,12 +47,13 @@
 #define APP_CANFD_POLL_PERIOD_MS                  2U
 #define APP_DOCK_SAMPLE_PERIOD_MS                 5U
 #define APP_WATCHDOG_PERIOD_MS                   20U
-#define APP_PRIORITY_COMMAND_COUNT                4U
+#define APP_PRIORITY_COMMAND_COUNT                5U
 
 #define APP_PRIORITY_ESTOP_INDEX                  0U
-#define APP_PRIORITY_COMM_TIMEOUT_INDEX           1U
-#define APP_PRIORITY_CAN_BUSOFF_INDEX              2U
-#define APP_PRIORITY_STOP_INDEX                   3U
+#define APP_PRIORITY_POWER_FAULT_INDEX            1U
+#define APP_PRIORITY_COMM_TIMEOUT_INDEX           2U
+#define APP_PRIORITY_CAN_BUSOFF_INDEX              3U
+#define APP_PRIORITY_STOP_INDEX                   4U
 
 typedef struct
 {
@@ -57,6 +64,10 @@ typedef struct
 static StaticTask_t app_control_task_storage;
 static StackType_t app_control_task_stack[APP_CONTROL_TASK_STACK_WORDS];
 static TaskHandle_t app_control_task_handle;
+
+static StaticTask_t app_power_task_storage;
+static StackType_t app_power_task_stack[APP_POWER_TASK_STACK_WORDS];
+static TaskHandle_t app_power_task_handle;
 
 static StaticTask_t app_serial_task_storage;
 static StackType_t app_serial_task_stack[APP_SERIAL_TASK_STACK_WORDS];
@@ -84,15 +95,24 @@ static volatile uint8_t app_priority_pending_mask;
 static volatile uint32_t app_safety_epoch;
 static volatile uint32_t app_control_generation;
 static volatile uint32_t app_can_generation;
+static volatile uint32_t app_power_generation;
 
 static StaticTask_t app_idle_task_storage;
 static StackType_t app_idle_task_stack[configMINIMAL_STACK_SIZE];
+
+static motion_command_handle_result_t app_submit_motion_command(
+    const motion_command_t *command,
+    void *context);
 
 static int8_t app_get_priority_command_index(motion_command_type_t type)
 {
   if(type == MOTION_CMD_ESTOP)
   {
     return (int8_t)APP_PRIORITY_ESTOP_INDEX;
+  }
+  if(type == MOTION_CMD_POWER_FAULT)
+  {
+    return (int8_t)APP_PRIORITY_POWER_FAULT_INDEX;
   }
   if(type == MOTION_CMD_COMM_TIMEOUT)
   {
@@ -107,6 +127,69 @@ static int8_t app_get_priority_command_index(motion_command_type_t type)
     return (int8_t)APP_PRIORITY_STOP_INDEX;
   }
   return -1;
+}
+
+static void app_power_task(void *parameter)
+{
+  TickType_t last_wake_tick = xTaskGetTickCount();
+  motion_command_t command;
+  uint8_t adc_ready = motor_current_init();
+  uint8_t sample_valid;
+  uint8_t severe_fault;
+  uint8_t zero_allowed;
+  int32_t left_count = motor_encoder_get_count(MOTOR_LEFT);
+  int32_t right_count = motor_encoder_get_count(MOTOR_RIGHT);
+  int32_t previous_left_count = left_count;
+  int32_t previous_right_count = right_count;
+  uint32_t power_status_before;
+  uint32_t power_status_after;
+
+  (void)parameter;
+  memset(&command, 0, sizeof(command));
+  command.version = MOTION_PROTOCOL_VERSION;
+  command.source = MOTION_SOURCE_LOCAL_SAFETY;
+  command.type = MOTION_CMD_POWER_FAULT;
+  for(;;)
+  {
+    power_status_before =
+        chassis_motion_controller_get_power_status_snapshot();
+    if(adc_ready == 0U)
+    {
+      adc_ready = motor_current_init();
+    }
+    sample_valid = ((adc_ready != 0U) &&
+                    (motor_current_update() != 0U)) ? 1U : 0U;
+    power_status_after =
+        chassis_motion_controller_get_power_status_snapshot();
+    left_count = motor_encoder_get_count(MOTOR_LEFT);
+    right_count = motor_encoder_get_count(MOTOR_RIGHT);
+    zero_allowed =
+        ((sample_valid != 0U) &&
+         (power_status_before == power_status_after) &&
+         ((power_status_after & CHASSIS_POWER_STATUS_ZERO_SAFE) != 0UL) &&
+         (left_count == previous_left_count) &&
+         (right_count == previous_right_count)) ? 1U : 0U;
+    previous_left_count = left_count;
+    previous_right_count = right_count;
+    power_supervisor_step(
+        sample_valid,
+        adc_monitor_get_raw(ADC_MONITOR_PA3),
+        motor_current_get_raw(MOTOR_LEFT),
+        motor_current_get_raw(MOTOR_RIGHT),
+        zero_allowed);
+    severe_fault = (uint8_t)(power_supervisor_get_fault_mask() &
+                             POWER_FAULT_SEVERE_MASK);
+    if((severe_fault != 0U) &&
+       (chassis_motion_controller_has_power_fault() == 0U))
+    {
+      command.sequence = 1UL;
+      (void)app_submit_motion_command(&command, app_command_queue);
+    }
+    app_power_generation++;
+    vTaskDelayUntil(&last_wake_tick,
+                    pdMS_TO_TICKS(
+                        power_supervisor_provisional_config()->sample_period_ms));
+  }
 }
 
 /* 通信任务只负责提交命令，底盘状态只能由控制任务修改。 */
@@ -271,7 +354,8 @@ static void app_watchdog_task(void *parameter)
                     pdMS_TO_TICKS(APP_WATCHDOG_PERIOD_MS));
     if(system_watchdog_health_step(&health,
                                    app_control_generation,
-                                   app_can_generation) != 0U)
+                                   app_can_generation,
+                                   app_power_generation) != 0U)
     {
       system_watchdog_feed();
     }
@@ -382,6 +466,7 @@ uint8_t app_freertos_init(void)
 {
   debug_uart_log_init();
   dock_ir_receiver_init();
+  power_supervisor_init(power_supervisor_provisional_config());
 
   app_command_queue = xQueueCreateStatic(
       APP_COMMAND_QUEUE_LENGTH,
@@ -397,6 +482,7 @@ uint8_t app_freertos_init(void)
   app_safety_epoch = 1UL;
   app_control_generation = 0UL;
   app_can_generation = 0UL;
+  app_power_generation = 0UL;
   serial_motion_protocol_init(app_submit_motion_command,
                               app_command_queue);
   canfd_protocol_init(app_submit_motion_command,
@@ -410,6 +496,14 @@ uint8_t app_freertos_init(void)
       APP_CONTROL_TASK_PRIORITY,
       app_control_task_stack,
       &app_control_task_storage);
+  app_power_task_handle = xTaskCreateStatic(
+      app_power_task,
+      "PowerMonitor",
+      APP_POWER_TASK_STACK_WORDS,
+      NULL,
+      APP_POWER_TASK_PRIORITY,
+      app_power_task_stack,
+      &app_power_task_storage);
   app_serial_task_handle = xTaskCreateStatic(
       app_serial_task,
       "SerialComm",
@@ -444,6 +538,7 @@ uint8_t app_freertos_init(void)
       &app_watchdog_task_storage);
 
   if((app_control_task_handle == NULL) ||
+     (app_power_task_handle == NULL) ||
      (app_serial_task_handle == NULL) ||
      (app_canfd_task_handle == NULL) ||
      (app_dock_task_handle == NULL) ||
@@ -454,7 +549,7 @@ uint8_t app_freertos_init(void)
   }
 
   debug_uart_log_printf(
-      "FREERTOS,READY,CTRL=5,SERIAL=3,CANFD=3,DOCK=2,CMDQ=8\r\n");
+      "FREERTOS,READY,CTRL=5,SERIAL=3,CANFD=3,POWER=2,DOCK=2,CMDQ=8\r\n");
   return 1U;
 }
 

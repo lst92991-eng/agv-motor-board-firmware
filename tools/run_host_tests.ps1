@@ -69,3 +69,7 @@ Invoke-CHostTest `
   -Name 'system_watchdog_test' `
   -TestRelativePath 'tests\system_watchdog_test.c' `
   -ModuleRelativePath @()
+Invoke-CHostTest `
+  -Name 'power_supervisor_test' `
+  -TestRelativePath 'tests\power_supervisor_test.c' `
+  -ModuleRelativePath 'src\power_supervisor.c'

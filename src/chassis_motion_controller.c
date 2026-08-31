@@ -32,6 +32,7 @@
 #include "motion_reference_receiver.h"
 #include "motor_encoder.h"
 #include "motor_speed_control.h"
+#include "power_supervisor.h"
 
 #define CHASSIS_CONTROL_LOOP_PERIOD_MS                    10U
 #define CHASSIS_CONTROL_SPEED_PERIOD_TICKS                 2U
@@ -125,6 +126,7 @@
 #define CHASSIS_FAULT_COMM_TIMEOUT                      0x0010U
 #define CHASSIS_FAULT_CAN_BUSOFF                        0x0020U
 #define CHASSIS_FAULT_MAGNETIC                          0x0040U
+#define CHASSIS_FAULT_POWER                             0x0080U
 
 /*
  * 实车落地验证：底层LEFT/RIGHT通道与车辆物理左右一致，但安装方向不同。
@@ -210,6 +212,8 @@ static motion_reference_control_t chassis_reference_control;
 static agv_motion_reference_t chassis_pending_reference;
 static uint8_t chassis_pending_reference_valid;
 static uint8_t chassis_external_reference_active;
+static uint32_t chassis_power_status_epoch;
+static volatile uint32_t chassis_power_status_snapshot;
 static int32_t chassis_external_last_left_count;
 static int32_t chassis_external_last_right_count;
 static float chassis_external_last_yaw_deg;
@@ -723,6 +727,28 @@ static uint8_t chassis_is_driving(void)
           (chassis_state == CHASSIS_STATE_SPEED_RAMP) ||
           (chassis_state == CHASSIS_STATE_LINE_TRACK) ||
           (chassis_state == CHASSIS_STATE_DECELERATE)) ? 1U : 0U;
+}
+
+static void chassis_publish_power_status(void)
+{
+  uint32_t status = 0UL;
+
+  if((chassis_motion_enabled == 0U) &&
+     (chassis_fault == CHASSIS_FAULT_NONE) &&
+     (chassis_task_active == 0U) &&
+     (chassis_external_reference_active == 0U) &&
+     (chassis_is_driving() == 0U) &&
+     (motor_speed_control_get_pwm(MOTOR_LEFT) == 0) &&
+     (motor_speed_control_get_pwm(MOTOR_RIGHT) == 0))
+  {
+    status |= CHASSIS_POWER_STATUS_ZERO_SAFE;
+  }
+  if((chassis_fault & CHASSIS_FAULT_POWER) != 0U)
+  {
+    status |= CHASSIS_POWER_STATUS_FAULT_LATCHED;
+  }
+  chassis_power_status_epoch++;
+  chassis_power_status_snapshot = (chassis_power_status_epoch << 2U) | status;
 }
 
 static void chassis_reset_task_progress(void)
@@ -1491,6 +1517,7 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
   {
     if((chassis_task_active != 0U) ||
        (chassis_fault != CHASSIS_FAULT_NONE) ||
+       (power_supervisor_is_ready() == 0U) ||
        (imu_heading_get_status() != BMI2_OK) ||
        (bumper_safety_can_clear() == 0U))
     {
@@ -1768,6 +1795,30 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     return MOTION_HANDLE_ACCEPTED;
   }
 
+  if(command->type == MOTION_CMD_POWER_FAULT)
+  {
+    /* 本地电气故障先撤PWM，再做任务取消和遥测，避免日志延迟停车。 */
+    motor_speed_control_hold_brake();
+    chassis_cancel_active_task();
+    chassis_clear_motion_reference();
+    chassis_motion_enabled = 0U;
+    chassis_fault |= CHASSIS_FAULT_POWER;
+    if((chassis_fault & CHASSIS_FAULT_ESTOP) != 0U)
+    {
+      chassis_enter_state(CHASSIS_STATE_ESTOP);
+    }
+    else if((chassis_fault & CHASSIS_FAULT_BUMPER) != 0U)
+    {
+      chassis_enter_state(CHASSIS_STATE_BUMPER_ERROR);
+    }
+    else
+    {
+      chassis_enter_state(CHASSIS_STATE_MOTION_ERROR);
+    }
+    chassis_send_safety_can(1U);
+    return MOTION_HANDLE_ACCEPTED;
+  }
+
   if(command->type == MOTION_CMD_RESET_ODOM)
   {
     if((chassis_task_active != 0U) ||
@@ -1810,6 +1861,14 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
        (bumper_safety_can_clear() == 0U))
     {
       return MOTION_HANDLE_REJECTED;
+    }
+
+    /* 第一次CLEAR只请求；新20ms样本确认后，第二次CLEAR才释放底盘锁存。 */
+    if(((chassis_fault & CHASSIS_FAULT_POWER) != 0U) &&
+       ((power_supervisor_get_fault_mask() & POWER_FAULT_SEVERE_MASK) != 0U))
+    {
+      return (power_supervisor_clear_fault() != 0U) ?
+             MOTION_HANDLE_BUSY : MOTION_HANDLE_REJECTED;
     }
 
     motor_speed_control_hold_brake();
@@ -1939,7 +1998,8 @@ static uint8_t chassis_get_safety_source_mask(void)
                        CHASSIS_FAULT_CAN_BUSOFF |
                        CHASSIS_FAULT_IMU |
                        CHASSIS_FAULT_MAGNETIC |
-                       CHASSIS_FAULT_MOTION)) != 0U)
+                       CHASSIS_FAULT_MOTION |
+                       CHASSIS_FAULT_POWER)) != 0U)
   {
     mask |= 0x04U;
   }
@@ -1990,7 +2050,7 @@ static void chassis_send_safety_can(uint8_t urgent)
   bumper_safety_get_snapshot(&bumper);
   status.uptime_ms = chassis_uptime_ms;
   status.fault_mask = (uint32_t)chassis_fault;
-  status.warning_mask = 0UL;
+  status.warning_mask = (uint32_t)power_supervisor_get_fault_mask();
   status.bumper_mask = (uint8_t)(bumper.active_mask | bumper.latched_mask);
   status.estop_source_mask = chassis_get_safety_source_mask();
   if((chassis_fault & (CHASSIS_FAULT_ESTOP | CHASSIS_FAULT_BUMPER)) != 0U)
@@ -2041,7 +2101,7 @@ static void chassis_send_drive_can(void)
                       chassis_task_sequence : 0UL;
   status.session_id = canfd_protocol_get_session_id();
   status.fault_mask = (uint32_t)chassis_fault;
-  status.warning_mask = 0UL;
+  status.warning_mask = (uint32_t)power_supervisor_get_fault_mask();
   status.x_mm = chassis_round_to_int(chassis_pose_x_mm);
   status.y_mm = chassis_round_to_int(chassis_pose_y_mm);
   status.yaw_cdeg = chassis_round_to_int(relative_yaw_deg * 100.0f);
@@ -2180,6 +2240,8 @@ void chassis_motion_controller_init(void)
          sizeof(chassis_pending_reference));
   chassis_pending_reference_valid = 0U;
   chassis_external_reference_active = 0U;
+  chassis_power_status_epoch = 0UL;
+  chassis_power_status_snapshot = 0UL;
   motion_reference_control_reset(&chassis_reference_control);
   chassis_heading_disagreement_ticks = 0U;
   chassis_total_counts = 0L;
@@ -2219,6 +2281,7 @@ void chassis_motion_controller_init(void)
 
   DWT->CYCCNT = 0U;
   chassis_last_cycle_count = DWT->CYCCNT;
+  chassis_publish_power_status();
 }
 
 void chassis_motion_controller_step_10ms(void)
@@ -2308,6 +2371,7 @@ void chassis_motion_controller_step_10ms(void)
   }
 
   chassis_update_can_status();
+  chassis_publish_power_status();
 }
 
 uint8_t chassis_motion_controller_get_state(void)
@@ -2323,4 +2387,15 @@ uint16_t chassis_motion_controller_get_fault_mask(void)
 uint32_t chassis_motion_controller_get_uptime_ms(void)
 {
   return chassis_uptime_ms;
+}
+
+uint32_t chassis_motion_controller_get_power_status_snapshot(void)
+{
+  return chassis_power_status_snapshot;
+}
+
+uint8_t chassis_motion_controller_has_power_fault(void)
+{
+  return ((chassis_power_status_snapshot &
+           CHASSIS_POWER_STATUS_FAULT_LATCHED) != 0UL) ? 1U : 0U;
 }

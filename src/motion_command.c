@@ -78,7 +78,8 @@ motion_command_error_t motion_command_validate(const motion_command_t *command)
           (command->type != MOTION_CMD_CAN_BUSOFF) &&
           (command->type != MOTION_CMD_ENABLE) &&
           (command->type != MOTION_CMD_DISABLE) &&
-          (command->type != MOTION_CMD_RELEASE))
+          (command->type != MOTION_CMD_RELEASE) &&
+          (command->type != MOTION_CMD_POWER_FAULT))
   {
     return MOTION_COMMAND_ERROR_UNSUPPORTED;
   }
@@ -112,6 +113,8 @@ const char *motion_command_get_name(motion_command_type_t type)
       return "DISABLE";
     case MOTION_CMD_RELEASE:
       return "RELEASE";
+    case MOTION_CMD_POWER_FAULT:
+      return "POWER_FAULT";
     default:
       return "UNKNOWN";
   }

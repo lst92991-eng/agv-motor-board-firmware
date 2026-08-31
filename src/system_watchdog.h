@@ -11,6 +11,7 @@ typedef struct
 {
   uint32_t last_control_generation;
   uint32_t last_can_generation;
+  uint32_t last_power_generation;
   uint8_t initialized;
 } system_watchdog_health_t;
 
@@ -18,7 +19,8 @@ typedef struct
 static inline uint8_t system_watchdog_health_step(
     system_watchdog_health_t *health,
     uint32_t control_generation,
-    uint32_t can_generation)
+    uint32_t can_generation,
+    uint32_t power_generation)
 {
   uint8_t healthy;
 
@@ -27,14 +29,17 @@ static inline uint8_t system_watchdog_health_step(
     return 0U;
   }
   healthy = ((control_generation != health->last_control_generation) &&
-             (can_generation != health->last_can_generation)) ? 1U : 0U;
+             (can_generation != health->last_can_generation) &&
+             (power_generation != health->last_power_generation)) ? 1U : 0U;
   health->last_control_generation = control_generation;
   health->last_can_generation = can_generation;
+  health->last_power_generation = power_generation;
   if(health->initialized == 0U)
   {
     health->initialized = 1U;
     return ((control_generation != 0U) &&
-            (can_generation != 0U)) ? 1U : 0U;
+            (can_generation != 0U) &&
+            (power_generation != 0U)) ? 1U : 0U;
   }
   return healthy;
 }

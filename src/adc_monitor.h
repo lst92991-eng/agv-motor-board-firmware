@@ -16,8 +16,8 @@ typedef enum
   ADC_MONITOR_CHANNEL_COUNT
 } adc_monitor_channel_t;
 
-/* 初始化ADC1以及PA3、PA4、PA5三个模拟输入。重复调用不会重新复位ADC。 */
-void adc_monitor_init(void);
+/* 初始化ADC1以及PA3、PA4、PA5；返回0表示就绪或校准等待超时。 */
+uint8_t adc_monitor_init(void);
 
 /* 依次采集三个通道，返回1表示成功，返回0表示ADC等待超时。 */
 uint8_t adc_monitor_update(void);

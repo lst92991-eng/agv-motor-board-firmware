@@ -28,7 +28,8 @@ typedef enum
   MOTION_CMD_CAN_BUSOFF = 9,
   MOTION_CMD_ENABLE = 10,
   MOTION_CMD_DISABLE = 11,
-  MOTION_CMD_RELEASE = 12
+  MOTION_CMD_RELEASE = 12,
+  MOTION_CMD_POWER_FAULT = 13
 } motion_command_type_t;
 
 typedef enum

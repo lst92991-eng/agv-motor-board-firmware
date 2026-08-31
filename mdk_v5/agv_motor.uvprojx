@@ -499,6 +499,11 @@
               <FilePath>..\src\motor_current.c</FilePath>
             </File>
             <File>
+              <FileName>power_supervisor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\power_supervisor.c</FilePath>
+            </File>
+            <File>
               <FileName>tof_i2c3.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\tof_i2c3.c</FilePath>

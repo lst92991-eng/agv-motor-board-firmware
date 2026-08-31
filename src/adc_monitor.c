@@ -17,7 +17,11 @@
 
 #define ADC_MONITOR_FULL_SCALE          4095UL
 #define ADC_MONITOR_REFERENCE_MV        3300UL
-#define ADC_MONITOR_TIMEOUT           100000UL
+/* ADC时钟32MHz，92.5周期采样加转换不足4us；每通道50us是有界故障窗。 */
+#define ADC_MONITOR_CPU_CYCLES_PER_US    192UL
+#define ADC_MONITOR_INIT_TIMEOUT_US      1000UL
+#define ADC_MONITOR_SAMPLE_TIMEOUT_US      50UL
+#define ADC_MONITOR_FALLBACK_LOOPS_PER_US  32UL
 
 static const adc_channel_select_type adc_monitor_channels[ADC_MONITOR_CHANNEL_COUNT] =
 {
@@ -29,20 +33,41 @@ static const adc_channel_select_type adc_monitor_channels[ADC_MONITOR_CHANNEL_CO
 static uint16_t adc_monitor_raw[ADC_MONITOR_CHANNEL_COUNT];
 static uint8_t adc_monitor_initialized;
 
-void adc_monitor_init(void)
+static uint8_t adc_monitor_timed_out(uint32_t start_cycle,
+                                     uint32_t timeout_us,
+                                     uint32_t *fallback_loops)
+{
+  if((uint32_t)(DWT->CYCCNT - start_cycle) >=
+     (timeout_us * ADC_MONITOR_CPU_CYCLES_PER_US))
+  {
+    return 1U;
+  }
+  if(*fallback_loops == 0UL)
+  {
+    return 1U;
+  }
+  (*fallback_loops)--;
+  return 0U;
+}
+
+uint8_t adc_monitor_init(void)
 {
   gpio_init_type gpio_init_struct;
   adc_common_config_type adc_common_struct;
   adc_base_config_type adc_base_struct;
+  uint32_t start_cycle;
+  uint32_t fallback_loops;
   uint8_t channel_index;
 
   if(adc_monitor_initialized != 0U)
   {
-    return;
+    return 1U;
   }
 
   crm_periph_clock_enable(CRM_GPIOA_PERIPH_CLOCK, TRUE);
   crm_periph_clock_enable(CRM_ADC1_PERIPH_CLOCK, TRUE);
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
   gpio_default_para_init(&gpio_init_struct);
   gpio_init_struct.gpio_mode = GPIO_MODE_ANALOG;
@@ -78,17 +103,41 @@ void adc_monitor_init(void)
   adc_occe_each_conversion_enable(ADC1, FALSE);
 
   adc_enable(ADC1, TRUE);
+  start_cycle = DWT->CYCCNT;
+  fallback_loops = ADC_MONITOR_INIT_TIMEOUT_US *
+                   ADC_MONITOR_FALLBACK_LOOPS_PER_US;
   while(adc_flag_get(ADC1, ADC_RDY_FLAG) == RESET)
   {
+    if(adc_monitor_timed_out(start_cycle, ADC_MONITOR_INIT_TIMEOUT_US,
+                             &fallback_loops) != 0U)
+    {
+      return 0U;
+    }
   }
 
   adc_calibration_init(ADC1);
+  start_cycle = DWT->CYCCNT;
+  fallback_loops = ADC_MONITOR_INIT_TIMEOUT_US *
+                   ADC_MONITOR_FALLBACK_LOOPS_PER_US;
   while(adc_calibration_init_status_get(ADC1))
   {
+    if(adc_monitor_timed_out(start_cycle, ADC_MONITOR_INIT_TIMEOUT_US,
+                             &fallback_loops) != 0U)
+    {
+      return 0U;
+    }
   }
   adc_calibration_start(ADC1);
+  start_cycle = DWT->CYCCNT;
+  fallback_loops = ADC_MONITOR_INIT_TIMEOUT_US *
+                   ADC_MONITOR_FALLBACK_LOOPS_PER_US;
   while(adc_calibration_status_get(ADC1))
   {
+    if(adc_monitor_timed_out(start_cycle, ADC_MONITOR_INIT_TIMEOUT_US,
+                             &fallback_loops) != 0U)
+    {
+      return 0U;
+    }
   }
 
   for(channel_index = 0U; channel_index < ADC_MONITOR_CHANNEL_COUNT; channel_index++)
@@ -96,11 +145,13 @@ void adc_monitor_init(void)
     adc_monitor_raw[channel_index] = 0U;
   }
   adc_monitor_initialized = 1U;
+  return 1U;
 }
 
 uint8_t adc_monitor_update(void)
 {
-  uint32_t timeout;
+  uint32_t start_cycle;
+  uint32_t fallback_loops;
   uint8_t channel_index;
 
   if(adc_monitor_initialized == 0U)
@@ -117,15 +168,16 @@ uint8_t adc_monitor_update(void)
     adc_flag_clear(ADC1, ADC_OCCE_FLAG | ADC_OCCO_FLAG | ADC_TCF_FLAG);
     adc_ordinary_software_trigger_enable(ADC1, TRUE);
 
-    timeout = ADC_MONITOR_TIMEOUT;
-    while((adc_flag_get(ADC1, ADC_OCCE_FLAG) == RESET) && (timeout > 0UL))
+    start_cycle = DWT->CYCCNT;
+    fallback_loops = ADC_MONITOR_SAMPLE_TIMEOUT_US *
+                     ADC_MONITOR_FALLBACK_LOOPS_PER_US;
+    while(adc_flag_get(ADC1, ADC_OCCE_FLAG) == RESET)
     {
-      timeout--;
-    }
-
-    if(timeout == 0UL)
-    {
-      return 0U;
+      if(adc_monitor_timed_out(start_cycle, ADC_MONITOR_SAMPLE_TIMEOUT_US,
+                               &fallback_loops) != 0U)
+      {
+        return 0U;
+      }
     }
 
     adc_monitor_raw[channel_index] = adc_ordinary_conversion_data_get(ADC1);
