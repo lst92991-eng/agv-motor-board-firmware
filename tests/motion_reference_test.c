@@ -306,6 +306,22 @@ static void test_velocity_stop_order_barriers(void)
               "STOP without later velocity cannot recover motion");
 }
 
+static void test_motion_reference_snapshot_gate(void)
+{
+  expect_true(motion_reference_snapshot_is_visible(
+                  10U, 10U, 10U, 11U, 11U, 1U, 1U, 0U) != 0U,
+              "stable snapshot after barrier is visible");
+  expect_true(motion_reference_snapshot_is_visible(
+                  10U, 12U, 12U, 13U, 13U, 1U, 1U, 0U) == 0U,
+              "barrier change during snapshot is rejected");
+  expect_true(motion_reference_snapshot_is_visible(
+                  12U, 12U, 10U, 13U, 13U, 1U, 1U, 0U) == 0U,
+              "pending barrier is rejected");
+  expect_true(motion_reference_snapshot_is_visible(
+                  10U, 10U, 10U, 11U, 12U, 1U, 1U, 0U) == 0U,
+              "accepted order change during snapshot is rejected");
+}
+
 static void test_control_math(void)
 {
   motion_reference_platform_limits_t limits = default_limits();
@@ -365,6 +381,7 @@ int main(void)
   test_session_reset();
   test_velocity_ingress_mailbox();
   test_velocity_stop_order_barriers();
+  test_motion_reference_snapshot_gate();
   test_control_math();
   if(failures != 0)
   {

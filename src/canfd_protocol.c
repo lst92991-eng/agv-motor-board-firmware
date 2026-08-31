@@ -123,8 +123,8 @@ static uint8_t canfd_last_result_payload[16];
 static uint8_t canfd_last_command_valid;
 static uint8_t canfd_last_result_valid;
 static uint8_t canfd_lease_counter_valid;
-static uint8_t canfd_session_valid;
-static uint8_t canfd_motion_session_active;
+static volatile uint8_t canfd_session_valid;
+static volatile uint8_t canfd_motion_session_active;
 static uint8_t canfd_comm_timeout_reported;
 static uint8_t canfd_busoff_reported;
 static uint8_t canfd_rx_overflow_latched;
@@ -1565,19 +1565,44 @@ uint8_t canfd_protocol_get_magnetic_sample(
 uint8_t canfd_protocol_get_motion_reference(
     agv_motion_reference_t *reference)
 {
-  if((canfd_session_valid == 0U) ||
-     (canfd_motion_session_active == 0U) ||
-     (CAN3->ctrlstat_bit.busoff != 0U) ||
-     (canfd_last_processed_command_order !=
-      canfd_last_command_arrival_order) ||
-     (canfd_accepted_velocity_order == 0U) ||
-     (motion_reference_is_after_barrier(
-          canfd_accepted_velocity_order,
-          canfd_last_command_arrival_order,
-          (canfd_last_command_arrival_order != 0U) ? 1U : 0U) == 0U))
+  agv_motion_reference_t snapshot;
+  uint32_t barrier_before;
+  uint32_t barrier_after;
+  uint32_t processed_after;
+  uint32_t accepted_before;
+  uint32_t accepted_after;
+  uint32_t now_ms;
+  uint8_t session_valid;
+  uint8_t motion_active;
+  uint8_t busoff;
+
+  if(reference == NULL)
   {
     return 0U;
   }
-  return motion_reference_receiver_get_latest(
-      &canfd_motion_reference_receiver, canfd_now_ms, reference);
+  barrier_before = canfd_last_command_arrival_order;
+  accepted_before = canfd_accepted_velocity_order;
+  now_ms = canfd_now_ms;
+  if(motion_reference_receiver_get_latest(
+       &canfd_motion_reference_receiver, now_ms, &snapshot) == 0U)
+  {
+    return 0U;
+  }
+  __DMB();
+  barrier_after = canfd_last_command_arrival_order;
+  processed_after = canfd_last_processed_command_order;
+  accepted_after = canfd_accepted_velocity_order;
+  session_valid = canfd_session_valid;
+  motion_active = canfd_motion_session_active;
+  busoff = (CAN3->ctrlstat_bit.busoff != 0U) ? 1U : 0U;
+  if((motion_reference_snapshot_is_visible(
+          barrier_before, barrier_after, processed_after,
+          accepted_before, accepted_after,
+          session_valid, motion_active, busoff) == 0U) ||
+     (agv_motion_reference_is_fresh(&snapshot, canfd_now_ms) == 0U))
+  {
+    return 0U;
+  }
+  *reference = snapshot;
+  return 1U;
 }

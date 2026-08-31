@@ -237,3 +237,25 @@ uint8_t motion_reference_is_after_barrier(uint32_t ingress_order,
   }
   return motion_reference_arrived_before(barrier_order, ingress_order);
 }
+
+uint8_t motion_reference_snapshot_is_visible(
+    uint32_t barrier_before,
+    uint32_t barrier_after,
+    uint32_t processed_after,
+    uint32_t accepted_before,
+    uint32_t accepted_after,
+    uint8_t session_valid,
+    uint8_t motion_active,
+    uint8_t busoff)
+{
+  if((session_valid == 0U) || (motion_active == 0U) || (busoff != 0U) ||
+     (barrier_before != barrier_after) ||
+     (processed_after != barrier_after) ||
+     (accepted_before == 0U) || (accepted_before != accepted_after))
+  {
+    return 0U;
+  }
+  return motion_reference_is_after_barrier(
+      accepted_after, barrier_after,
+      (barrier_after != 0U) ? 1U : 0U);
+}

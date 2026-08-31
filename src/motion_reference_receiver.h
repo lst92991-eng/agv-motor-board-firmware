@@ -82,6 +82,15 @@ uint8_t motion_reference_arrived_before(uint32_t first,
 uint8_t motion_reference_is_after_barrier(uint32_t ingress_order,
                                           uint32_t barrier_order,
                                           uint8_t barrier_valid);
+uint8_t motion_reference_snapshot_is_visible(
+    uint32_t barrier_before,
+    uint32_t barrier_after,
+    uint32_t processed_after,
+    uint32_t accepted_before,
+    uint32_t accepted_after,
+    uint8_t session_valid,
+    uint8_t motion_active,
+    uint8_t busoff);
 
 #ifdef __cplusplus
 }
