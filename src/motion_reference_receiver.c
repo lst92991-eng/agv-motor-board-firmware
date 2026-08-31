@@ -148,3 +148,92 @@ uint8_t motion_reference_receiver_get_latest(
   }
   return 0U;
 }
+
+void motion_reference_ingress_mailbox_reset(
+    motion_reference_ingress_mailbox_t *mailbox)
+{
+  if(mailbox != NULL)
+  {
+    memset(mailbox, 0, sizeof(*mailbox));
+  }
+}
+
+void motion_reference_ingress_mailbox_publish(
+    motion_reference_ingress_mailbox_t *mailbox,
+    const uint8_t *payload,
+    uint32_t receive_ms,
+    uint32_t arrival_order)
+{
+  if((mailbox == NULL) || (payload == NULL) || (arrival_order == 0U))
+  {
+    return;
+  }
+  mailbox->generation++;
+  MOTION_REFERENCE_MEMORY_BARRIER();
+  memcpy(mailbox->latest.payload, payload,
+         AGV_MOTION_REFERENCE_PAYLOAD_SIZE);
+  mailbox->latest.receive_ms = receive_ms;
+  mailbox->latest.arrival_order = arrival_order;
+  mailbox->valid = 1U;
+  MOTION_REFERENCE_MEMORY_BARRIER();
+  mailbox->generation++;
+}
+
+uint8_t motion_reference_ingress_mailbox_take(
+    motion_reference_ingress_mailbox_t *mailbox,
+    motion_reference_ingress_t *ingress)
+{
+  motion_reference_ingress_t snapshot;
+  uint32_t generation_before;
+  uint32_t generation_after;
+  uint8_t valid;
+  uint8_t attempt;
+
+  if((mailbox == NULL) || (ingress == NULL))
+  {
+    return 0U;
+  }
+  for(attempt = 0U; attempt < 3U; attempt++)
+  {
+    generation_before = mailbox->generation;
+    if((generation_before & 1UL) != 0UL)
+    {
+      continue;
+    }
+    MOTION_REFERENCE_MEMORY_BARRIER();
+    snapshot = mailbox->latest;
+    valid = mailbox->valid;
+    MOTION_REFERENCE_MEMORY_BARRIER();
+    generation_after = mailbox->generation;
+    if((generation_before == generation_after) &&
+       ((generation_after & 1UL) == 0UL))
+    {
+      if((valid == 0U) ||
+         (snapshot.arrival_order == mailbox->last_taken_order))
+      {
+        return 0U;
+      }
+      mailbox->last_taken_order = snapshot.arrival_order;
+      *ingress = snapshot;
+      return 1U;
+    }
+  }
+  return 0U;
+}
+
+uint8_t motion_reference_arrived_before(uint32_t first,
+                                        uint32_t second)
+{
+  return (((int32_t)(first - second)) < 0) ? 1U : 0U;
+}
+
+uint8_t motion_reference_is_after_barrier(uint32_t ingress_order,
+                                          uint32_t barrier_order,
+                                          uint8_t barrier_valid)
+{
+  if(barrier_valid == 0U)
+  {
+    return 1U;
+  }
+  return motion_reference_arrived_before(barrier_order, ingress_order);
+}

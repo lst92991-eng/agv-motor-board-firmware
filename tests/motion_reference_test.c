@@ -209,6 +209,103 @@ static void test_session_reset(void)
               "new session starts fresh sequence history");
 }
 
+static void test_velocity_ingress_mailbox(void)
+{
+  motion_reference_ingress_mailbox_t mailbox = {0};
+  motion_reference_ingress_t ingress;
+  motion_reference_receiver_t receiver = {0};
+  agv_motion_reference_t latest;
+  uint8_t payload[AGV_MOTION_REFERENCE_PAYLOAD_SIZE];
+  uint16_t sequence;
+
+  motion_reference_ingress_mailbox_reset(&mailbox);
+  for(sequence = 1U; sequence <= 8U; sequence++)
+  {
+    make_payload(payload, 7U, sequence, 100U,
+                 (int16_t)sequence, 0, 400U, 500U);
+    motion_reference_ingress_mailbox_publish(
+        &mailbox, payload, 100U + sequence, sequence);
+  }
+  expect_true(motion_reference_ingress_mailbox_take(
+                  &mailbox, &ingress) != 0U,
+              "velocity flood leaves one mailbox sample");
+  expect_true(ingress.arrival_order == 8U &&
+                  ingress.receive_ms == 108U &&
+                  agv_motion_read_u16_le(&ingress.payload[4]) == 8U,
+              "velocity flood retains only the latest frame");
+  expect_true(motion_reference_ingress_mailbox_take(
+                  &mailbox, &ingress) == 0U,
+              "latest mailbox sample is taken once");
+
+  motion_reference_ingress_mailbox_reset(&mailbox);
+  make_payload(payload, 7U, 1U, 100U, 100, 0, 400U, 500U);
+  motion_reference_ingress_mailbox_publish(
+      &mailbox, payload, 100U, 1U);
+  expect_true(motion_reference_ingress_mailbox_take(
+                  &mailbox, &ingress) != 0U,
+              "captured timestamp sample is available at delayed poll");
+  motion_reference_receiver_reset(&receiver, 7U);
+  expect_true(motion_reference_receiver_accept(
+                  &receiver, ingress.payload,
+                  AGV_MOTION_REFERENCE_PAYLOAD_SIZE,
+                  ingress.receive_ms, 500U) ==
+              MOTION_REFERENCE_RECEIVER_ACCEPTED,
+              "delayed poll accepts using capture timestamp");
+  expect_true(motion_reference_receiver_get_latest(
+                  &receiver, 199U, &latest) != 0U &&
+                  latest.produced_ms == 100U,
+              "queued reference did not restart TTL at poll");
+  expect_true(motion_reference_receiver_get_latest(
+                  &receiver, 200U, &latest) == 0U,
+              "capture-based TTL expires on original boundary");
+}
+
+static void test_velocity_stop_order_barriers(void)
+{
+  motion_reference_ingress_mailbox_t mailbox = {0};
+  motion_reference_ingress_t ingress;
+  motion_reference_receiver_t receiver = {0};
+  agv_motion_reference_t latest;
+  uint8_t payload[AGV_MOTION_REFERENCE_PAYLOAD_SIZE];
+
+  motion_reference_ingress_mailbox_reset(&mailbox);
+  make_payload(payload, 7U, 1U, 100U, 100, 0, 400U, 500U);
+  motion_reference_ingress_mailbox_publish(&mailbox, payload, 10U, 1U);
+  make_payload(payload, 7U, 2U, 100U, 200, 0, 400U, 500U);
+  motion_reference_ingress_mailbox_publish(&mailbox, payload, 12U, 3U);
+  expect_true(motion_reference_ingress_mailbox_take(
+                  &mailbox, &ingress) != 0U &&
+                  motion_reference_is_after_barrier(
+                      ingress.arrival_order, 2U, 1U) != 0U,
+              "v1 STOP v2 retains only velocity after barrier");
+  motion_reference_receiver_reset(&receiver, 7U);
+  motion_reference_receiver_invalidate_latest(&receiver);
+  expect_true(motion_reference_receiver_accept(
+                  &receiver, ingress.payload,
+                  AGV_MOTION_REFERENCE_PAYLOAD_SIZE,
+                  ingress.receive_ms, 100U) ==
+              MOTION_REFERENCE_RECEIVER_ACCEPTED,
+              "newer v2 may run only after STOP barrier");
+
+  motion_reference_ingress_mailbox_reset(&mailbox);
+  make_payload(payload, 7U, 3U, 100U, 100, 0, 400U, 500U);
+  motion_reference_ingress_mailbox_publish(&mailbox, payload, 20U, 4U);
+  expect_true(motion_reference_ingress_mailbox_take(
+                  &mailbox, &ingress) != 0U &&
+                  motion_reference_is_after_barrier(
+                      ingress.arrival_order, 5U, 1U) == 0U,
+              "v1 STOP discards velocity before barrier");
+  expect_true(motion_reference_is_after_barrier(
+                  ingress.arrival_order, 0U, 0U) != 0U,
+              "velocity survives when the batch has no barrier");
+  motion_reference_receiver_invalidate_latest(&receiver);
+  expect_true(motion_reference_receiver_get_latest(
+                  &receiver, 20U, &latest) == 0U &&
+                  motion_reference_ingress_mailbox_take(
+                      &mailbox, &ingress) == 0U,
+              "STOP without later velocity cannot recover motion");
+}
+
 static void test_control_math(void)
 {
   motion_reference_platform_limits_t limits = default_limits();
@@ -266,6 +363,8 @@ int main(void)
   test_golden_payload_and_ttl();
   test_sequence_rules();
   test_session_reset();
+  test_velocity_ingress_mailbox();
+  test_velocity_stop_order_barriers();
   test_control_math();
   if(failures != 0)
   {

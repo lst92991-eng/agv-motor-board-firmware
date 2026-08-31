@@ -72,6 +72,8 @@
 
 typedef struct
 {
+  uint32_t arrival_order;
+  uint32_t receive_ms;
   uint32_t id;
   can_data_length_type data_length;
   uint8_t data_size;
@@ -98,7 +100,11 @@ static canfd_tx_queue_t canfd_tx_normal_queue;
 
 static motion_command_handler_t canfd_motion_handler;
 static void *canfd_motion_handler_context;
-static uint32_t canfd_now_ms;
+static volatile uint32_t canfd_now_ms;
+static volatile uint32_t canfd_rx_arrival_order;
+static volatile uint32_t canfd_last_command_arrival_order;
+static volatile uint32_t canfd_last_processed_command_order;
+static volatile uint32_t canfd_accepted_velocity_order;
 static uint32_t canfd_host_session;
 static uint32_t canfd_last_lease_ms;
 static uint32_t canfd_last_busoff_recovery_ms;
@@ -131,6 +137,8 @@ static canfd_tx_queue_t *canfd_tx_active_queue;
 static canfd_magnetic_sample_t canfd_magnetic_sample;
 static volatile uint32_t canfd_magnetic_generation;
 static motion_reference_receiver_t canfd_motion_reference_receiver;
+static motion_reference_ingress_mailbox_t
+  canfd_motion_reference_ingress;
 
 static uint8_t canfd_dlc_to_size(can_data_length_type data_length)
 {
@@ -526,6 +534,7 @@ static void canfd_accept_claim(uint32_t command_id,
     canfd_last_command_session = session_id;
     motion_reference_receiver_reset(&canfd_motion_reference_receiver,
                                     session_id);
+    canfd_accepted_velocity_order = 0UL;
   }
   canfd_host_session = session_id;
   canfd_session_valid = 1U;
@@ -699,6 +708,7 @@ static void canfd_parse_command(const canfd_frame_t *frame)
     canfd_session_valid = 0U;
     canfd_motion_session_active = 0U;
     motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
+    canfd_accepted_velocity_order = 0UL;
   }
 }
 
@@ -741,6 +751,7 @@ static void canfd_parse_velocity(const canfd_frame_t *frame)
 {
   uint32_t elapsed_ms;
   uint16_t lease_remaining_ms;
+  motion_reference_receiver_result_t result;
 
   if((frame->data_size != AGV_MOTION_REFERENCE_PAYLOAD_SIZE) ||
      (canfd_session_valid == 0U) ||
@@ -755,12 +766,16 @@ static void canfd_parse_velocity(const canfd_frame_t *frame)
   }
   lease_remaining_ms = (uint16_t)((uint32_t)canfd_lease_duration_ms -
                                   elapsed_ms);
-  (void)motion_reference_receiver_accept(
+  result = motion_reference_receiver_accept(
       &canfd_motion_reference_receiver,
       frame->data,
       (uint16_t)frame->data_size,
-      canfd_now_ms,
+      frame->receive_ms,
       lease_remaining_ms);
+  if(result == MOTION_REFERENCE_RECEIVER_ACCEPTED)
+  {
+    canfd_accepted_velocity_order = frame->arrival_order;
+  }
   /*
    * The session/sequence/TTL receiver is ready, but the chassis deliberately
    * does not consume this reference or publish velocity capability before G3.
@@ -929,6 +944,7 @@ static void canfd_check_timeouts_and_bus(void)
     {
       motion_reference_receiver_invalidate_latest(
           &canfd_motion_reference_receiver);
+      canfd_accepted_velocity_order = 0UL;
       canfd_busoff_reported = 1U;
       canfd_submit_internal_fault(MOTION_CMD_CAN_BUSOFF);
     }
@@ -952,6 +968,7 @@ static void canfd_check_timeouts_and_bus(void)
     canfd_session_valid = 0U;
     canfd_lease_counter_valid = 0U;
     motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
+    canfd_accepted_velocity_order = 0UL;
     if((canfd_motion_session_active != 0U) &&
        (canfd_comm_timeout_reported == 0U))
     {
@@ -1102,6 +1119,10 @@ void canfd_protocol_init(motion_command_handler_t handler, void *context)
   canfd_motion_handler = handler;
   canfd_motion_handler_context = context;
   canfd_now_ms = 0UL;
+  canfd_rx_arrival_order = 0UL;
+  canfd_last_command_arrival_order = 0UL;
+  canfd_last_processed_command_order = 0UL;
+  canfd_accepted_velocity_order = 0UL;
   canfd_host_session = 0UL;
   canfd_last_lease_ms = 0UL;
   canfd_last_busoff_recovery_ms = 0UL;
@@ -1134,20 +1155,53 @@ void canfd_protocol_init(motion_command_handler_t handler, void *context)
   memset(&canfd_magnetic_sample, 0, sizeof(canfd_magnetic_sample));
   canfd_magnetic_generation = 0UL;
   motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
+  motion_reference_ingress_mailbox_reset(
+      &canfd_motion_reference_ingress);
   canfd_hardware_init();
 }
 
 void canfd_protocol_poll(uint32_t now_ms)
 {
   canfd_frame_t frame;
+  canfd_frame_t velocity_frame;
+  motion_reference_ingress_t velocity_ingress;
   uint8_t processed = 0U;
+  uint8_t velocity_available;
+  uint8_t barrier_valid = 0U;
+  uint32_t barrier_order = 0UL;
 
   canfd_now_ms = now_ms;
+  velocity_available = motion_reference_ingress_mailbox_take(
+      &canfd_motion_reference_ingress, &velocity_ingress);
   while((processed < CANFD_RX_QUEUE_LENGTH) &&
         (canfd_rx_queue_pop(&frame) != 0U))
   {
+    if(frame.id == CANFD_ID_CHASSIS_COMMAND)
+    {
+      barrier_order = frame.arrival_order;
+      barrier_valid = 1U;
+      canfd_last_processed_command_order = frame.arrival_order;
+    }
     canfd_parse_frame(&frame);
     processed++;
+  }
+  if((velocity_available != 0U) &&
+     (canfd_last_processed_command_order ==
+      canfd_last_command_arrival_order) &&
+     (motion_reference_is_after_barrier(
+          velocity_ingress.arrival_order,
+          barrier_order,
+          barrier_valid) != 0U))
+  {
+    memset(&velocity_frame, 0, sizeof(velocity_frame));
+    velocity_frame.arrival_order = velocity_ingress.arrival_order;
+    velocity_frame.receive_ms = velocity_ingress.receive_ms;
+    velocity_frame.id = CANFD_ID_VELOCITY;
+    velocity_frame.data_length = CAN_DLC_BYTES_16;
+    velocity_frame.data_size = AGV_MOTION_REFERENCE_PAYLOAD_SIZE;
+    memcpy(velocity_frame.data, velocity_ingress.payload,
+           AGV_MOTION_REFERENCE_PAYLOAD_SIZE);
+    canfd_parse_frame(&velocity_frame);
   }
   canfd_check_timeouts_and_bus();
   canfd_transmit_one();
@@ -1160,6 +1214,7 @@ void canfd_protocol_rx_irq_handler(void)
   uint8_t data_size;
   uint8_t index;
   uint8_t guard = 0U;
+  uint32_t arrival_order;
 
   while((can_rxbuf_status_get(CAN3) != CAN_RXBUF_STATUS_EMPTY) &&
         (guard < CANFD_RX_QUEUE_LENGTH))
@@ -1170,9 +1225,7 @@ void canfd_protocol_rx_irq_handler(void)
       break;
     }
     data_size = canfd_dlc_to_size(rx.data_length);
-    next_head = (uint8_t)((canfd_rx_head + 1U) % CANFD_RX_QUEUE_LENGTH);
-    if((next_head == canfd_rx_tail) ||
-       (rx.id_type != CAN_ID_STANDARD) ||
+    if((rx.id_type != CAN_ID_STANDARD) ||
        (rx.frame_type != CAN_FRAME_DATA) ||
        (rx.fd_format != CAN_FORMAT_FD) ||
        (rx.fd_rate_switch != CAN_BRS_ON) ||
@@ -1182,16 +1235,57 @@ void canfd_protocol_rx_irq_handler(void)
     }
     else
     {
-      canfd_rx_queue[canfd_rx_head].id = rx.id;
-      canfd_rx_queue[canfd_rx_head].data_length = rx.data_length;
-      canfd_rx_queue[canfd_rx_head].data_size = data_size;
-      for(index = 0U; index < data_size; index++)
+      arrival_order = ++canfd_rx_arrival_order;
+      if(arrival_order == 0UL)
       {
-        canfd_rx_queue[canfd_rx_head].data[index] = rx.data[index];
+        arrival_order = ++canfd_rx_arrival_order;
       }
-      __DMB();
-      canfd_rx_head = next_head;
-      canfd_rx_count++;
+      if(rx.id == CANFD_ID_VELOCITY)
+      {
+        if(data_size == AGV_MOTION_REFERENCE_PAYLOAD_SIZE)
+        {
+          /* canfd_now_ms trails hardware arrival by at most the 2 ms poll. */
+          motion_reference_ingress_mailbox_publish(
+              &canfd_motion_reference_ingress,
+              rx.data,
+              canfd_now_ms,
+              arrival_order);
+          canfd_rx_count++;
+        }
+        else
+        {
+          canfd_rx_drop_count++;
+        }
+      }
+      else
+      {
+        if(rx.id == CANFD_ID_CHASSIS_COMMAND)
+        {
+          /* A queued command is a barrier even if the FIFO is already full. */
+          canfd_last_command_arrival_order = arrival_order;
+        }
+        next_head = (uint8_t)((canfd_rx_head + 1U) %
+                              CANFD_RX_QUEUE_LENGTH);
+        if(next_head == canfd_rx_tail)
+        {
+          canfd_rx_drop_count++;
+        }
+        else
+        {
+          canfd_rx_queue[canfd_rx_head].arrival_order = arrival_order;
+          canfd_rx_queue[canfd_rx_head].receive_ms = canfd_now_ms;
+          canfd_rx_queue[canfd_rx_head].id = rx.id;
+          canfd_rx_queue[canfd_rx_head].data_length = rx.data_length;
+          canfd_rx_queue[canfd_rx_head].data_size = data_size;
+          for(index = 0U; index < data_size; index++)
+          {
+            canfd_rx_queue[canfd_rx_head].data[index] = rx.data[index];
+          }
+          __DMB();
+          canfd_rx_head = next_head;
+          canfd_rx_count++;
+        }
+      }
     }
     guard++;
   }
@@ -1473,7 +1567,14 @@ uint8_t canfd_protocol_get_motion_reference(
 {
   if((canfd_session_valid == 0U) ||
      (canfd_motion_session_active == 0U) ||
-     (CAN3->ctrlstat_bit.busoff != 0U))
+     (CAN3->ctrlstat_bit.busoff != 0U) ||
+     (canfd_last_processed_command_order !=
+      canfd_last_command_arrival_order) ||
+     (canfd_accepted_velocity_order == 0U) ||
+     (motion_reference_is_after_barrier(
+          canfd_accepted_velocity_order,
+          canfd_last_command_arrival_order,
+          (canfd_last_command_arrival_order != 0U) ? 1U : 0U) == 0U))
   {
     return 0U;
   }
