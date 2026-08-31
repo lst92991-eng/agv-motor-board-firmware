@@ -14,6 +14,8 @@ if($null -eq $vcvarsPath) {
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $includePath = Join-Path $repoRoot 'src'
+$testIncludePath = Join-Path $repoRoot 'tests'
+$boardIncludePath = Join-Path $repoRoot 'at32f45x_board'
 $contractIncludePath = (Resolve-Path -LiteralPath `
     (Join-Path $repoRoot '..\agv-motion-contract\include')).Path
 
@@ -33,9 +35,9 @@ function Invoke-CHostTest {
   $moduleArguments = $moduleSources -join ' '
   $testExecutable = Join-Path ([IO.Path]::GetTempPath()) `
     ("agv_{0}.exe" -f $Name)
-  $command = 'call "{0}" >nul && cl /nologo /W4 /WX /utf-8 /TC "{1}" {2} /I "{3}" /I "{4}" /Fe:"{5}" && "{5}"' -f `
+  $command = 'call "{0}" >nul && cl /nologo /W4 /WX /utf-8 /TC "{1}" {2} /I "{3}" /I "{4}" /I "{5}" /I "{6}" /Fe:"{7}" && "{7}"' -f `
     $vcvarsPath, $testSource, $moduleArguments, $includePath, `
-    $contractIncludePath, $testExecutable
+    $contractIncludePath, $testIncludePath, $boardIncludePath, $testExecutable
 
   & $env:ComSpec /d /c $command
   if($LASTEXITCODE -ne 0) {
@@ -47,10 +49,6 @@ Invoke-CHostTest `
   -Name 'chassis_heading_fusion_test' `
   -TestRelativePath 'tests\chassis_heading_fusion_test.c' `
   -ModuleRelativePath 'src\chassis_heading_fusion.c'
-Invoke-CHostTest `
-  -Name 'magnetic_follow_controller_test' `
-  -TestRelativePath 'tests\magnetic_follow_controller_test.c' `
-  -ModuleRelativePath 'src\magnetic_follow_controller.c'
 Invoke-CHostTest `
   -Name 'canfd_status_codec_test' `
   -TestRelativePath 'tests\canfd_status_codec_test.c' `
@@ -73,3 +71,8 @@ Invoke-CHostTest `
   -Name 'power_supervisor_test' `
   -TestRelativePath 'tests\power_supervisor_test.c' `
   -ModuleRelativePath 'src\power_supervisor.c'
+Invoke-CHostTest `
+  -Name 'motor_speed_control_test' `
+  -TestRelativePath 'tests\motor_speed_control_test.c' `
+  -ModuleRelativePath 'src\motor_speed_control.c', `
+                      'src\motor_pid.c'

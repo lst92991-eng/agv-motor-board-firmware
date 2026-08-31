@@ -1,8 +1,8 @@
 # AGV电机驱动板正式固件
 
 AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD接收Supervisor
-任务，在电机板本地完成双电机速度闭环、IMU航向、里程计、磁条循迹、防撞锁存和
-失联停车。
+仲裁后的短TTL `MotionReference(v, omega)`，在电机板本地完成差速解算、双电机
+速度反馈、IMU/里程计、防撞、电气监督和失联停车。路线与磁跟踪算法不在电机板。
 
 ## 正式入口
 
@@ -10,23 +10,27 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
 
 | 任务 | 周期 | 职责 |
 | --- | ---: | --- |
-| `ChassisCtrl` | 10ms | 运动状态机、安全处理、速度目标与遥测 |
+| `ChassisCtrl` | 10ms | 唯一参考执行器、本地安全、里程计与遥测 |
 | `SerialComm` | 2ms | 调试串口命令解析 |
 | `CANFD` | 2ms | 整车CAN FD协议、控制租约和命令结果 |
+| `PowerMonitor` | 20ms | ADC、电流/母线监督与故障提交 |
+| `DockSensors` | 5ms | 双TOF和红外采集，只上报观测 |
+| `Watchdog` | 20ms | Control/CAN/Power均推进时才喂狗 |
 
 ## 已验收能力
 
 - 前进、后退、左转、右转；
 - 双编码器速度PI和BMI270/编码器航向融合；
-- 已验收的直线磁条循迹闭环；圆滑L型仍待实车验收；
+- 磁条路线的历史实车证据仍有效；新架构由Supervisor磁producer生成统一参考，
+  尚待重新烧录回归；
 - 四路防撞条本地锁存停车；
 - CAN FD 500k/4M BRS、200ms控制租约、bus-off与通信超时停车；
 - 调试串口和整车CAN诊断帧。
 
 关键生产模块边界：
 
-- `chassis_motion_controller.*`：任务状态机、安全联动和最终轮速目标；
-- `magnetic_follow_controller.*`：磁样本质量、偏移PD外环和动态限速；
+- `chassis_motion_controller.*`：唯一0x401执行器、本地安全、里程计和遥测；
+- `motion_reference_receiver/control.*`：latest-only、TTL、差速、共同限幅和斜率；
 - `canfd_protocol.*`：CAN硬件队列、命令、租约和bus-off恢复；
 - `canfd_status_codec.*`：状态PDO固定小端字节布局，可在主机独立回归。
 
@@ -34,11 +38,10 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
 
 - `dock_tof_sensor.*`：双VL53L0X采集、滤波、距离和对准误差；
 - `dock_ir_receiver.*`：IRM-H238T原始38kHz载波状态；
-- `pn532_uart5.*`、`rfid_record.*`：RFID底层能力；
-- `adc_monitor.*`、`motor_current.*`：ADC和电流采集基础能力。
+- `power_supervisor.*`、`adc_monitor.*`、`motor_current.*`：失效关闭的电流/母线监督。
 
-这些模块不代表充电对准、RFID定位或电流保护已经完成。正式对接前仍需增加独立
-应用状态机、CAN对象、故障策略和实车验收。
+这些模块不代表充电对准或完整电流环已经完成。未接入的PN532/RFID源码已移出
+生产树；未来只能作为事件producer接入Supervisor，不能恢复电机板运动分支。
 
 ## 构建
 
@@ -55,7 +58,7 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
 & .\tools\run_host_tests.ps1
 ```
 
-当前覆盖航向融合、磁循迹控制和CAN FD状态PDO编码。
+当前覆盖航向融合、CAN FD状态PDO、运动参考、维护串口、看门狗、电气监督和速度环。
 
 ## 关键文档
 

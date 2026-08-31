@@ -30,8 +30,11 @@ float motor_speed_control_get_measured_rpm(motor_id_t motor);
 /* 读取指定电机当前的有符号 PWM，范围为 -1000~1000。 */
 int16_t motor_speed_control_get_pwm(motor_id_t motor);
 
-/* 任一车轮的单次越障增扭已耗尽仍未转动时返回1。 */
-uint8_t motor_speed_control_has_stall_recovery_failed(void);
+/* 任一车轮反馈越界或持续无进展时返回1；不会自动增扭脱困。 */
+uint8_t motor_speed_control_has_fault(void);
+
+/* 仅由底盘显式CLEAR成功路径调用，普通停车/重同步不得清故障。 */
+void motor_speed_control_clear_fault(void);
 
 /* 两路目标速度清零，并让 AT8236 保持主动刹车。 */
 void motor_speed_control_hold_brake(void);

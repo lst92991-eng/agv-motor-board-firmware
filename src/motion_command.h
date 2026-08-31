@@ -18,12 +18,10 @@ typedef enum
 
 typedef enum
 {
-  MOTION_CMD_GOTO_LOCAL = 1,
-  MOTION_CMD_FOLLOW_MAG,
-  MOTION_CMD_STOP,
-  MOTION_CMD_ESTOP,
-  MOTION_CMD_RESET_ODOM,
-  MOTION_CMD_CLEAR_FAULT,
+  MOTION_CMD_STOP = 3,
+  MOTION_CMD_ESTOP = 4,
+  MOTION_CMD_RESET_ODOM = 5,
+  MOTION_CMD_CLEAR_FAULT = 6,
   MOTION_CMD_COMM_TIMEOUT = 8,
   MOTION_CMD_CAN_BUSOFF = 9,
   MOTION_CMD_ENABLE = 10,
@@ -37,16 +35,10 @@ typedef enum
   MOTION_COMMAND_ERROR_NONE = 0,
   MOTION_COMMAND_ERROR_VERSION = 1,
   MOTION_COMMAND_ERROR_SEQUENCE = 2,
-  MOTION_COMMAND_ERROR_RANGE = 3,
   MOTION_COMMAND_ERROR_FORMAT = 4,
   MOTION_COMMAND_ERROR_UNSUPPORTED = 5,
   MOTION_COMMAND_ERROR_BUSY = 6,
-  MOTION_COMMAND_ERROR_CRC = 7,
-  MOTION_COMMAND_ERROR_LENGTH = 8,
-  MOTION_COMMAND_ERROR_SESSION = 9,
-  MOTION_COMMAND_ERROR_FAULT_LOCKED = 10,
-  MOTION_COMMAND_ERROR_TIMEOUT = 11,
-  MOTION_COMMAND_ERROR_CAN_BUSOFF = 12
+  MOTION_COMMAND_ERROR_FAULT_LOCKED = 10
 } motion_command_error_t;
 
 typedef enum
@@ -59,34 +51,11 @@ typedef enum
 
 typedef struct
 {
-  int32_t x_mm;
-  int32_t y_mm;
-  int32_t yaw_cdeg;
-  uint16_t speed_mm_s;
-  uint32_t timeout_ms;
-} motion_goto_local_data_t;
-
-typedef struct
-{
-  int32_t distance_mm;
-  int16_t target_offset_x10mm;
-  uint8_t allow_multi_peak;
-  uint16_t speed_mm_s;
-  uint32_t timeout_ms;
-} motion_follow_mag_data_t;
-
-typedef struct
-{
   uint8_t version;
   uint32_t sequence;
   uint32_t session_id;
   motion_command_source_t source;
   motion_command_type_t type;
-  union
-  {
-    motion_goto_local_data_t goto_local;
-    motion_follow_mag_data_t follow_mag;
-  } data;
 } motion_command_t;
 
 typedef motion_command_handle_result_t (*motion_command_handler_t)(

@@ -39,11 +39,9 @@
 #define CANFD_LEASE_MIN_MS                      100U
 #define CANFD_LEASE_DEFAULT_MS                  200U
 #define CANFD_LEASE_MAX_MS                     1000U
-#define CANFD_TASK_TIMEOUT_MAX_MS            120000UL
 #define CANFD_BUSOFF_RECOVERY_PERIOD_MS        1000UL
 #define CANFD_TX_COMPLETE_TIMEOUT_MS              50UL
 
-#define CANFD_SAFETY_SOURCE_BUMPER              0x01U
 #define CANFD_BUS_STATE_BUSOFF                  0x01U
 #define CANFD_BUS_STATE_ERROR_PASSIVE           0x02U
 #define CANFD_BUS_STATE_ERROR_WARNING           0x04U
@@ -51,12 +49,8 @@
 
 #define CANFD_RESULT_STAGE_RECEIVED               0U
 #define CANFD_RESULT_STAGE_ACCEPTED               1U
-#define CANFD_RESULT_STAGE_EXECUTING              2U
 #define CANFD_RESULT_STAGE_SUCCEEDED              3U
 #define CANFD_RESULT_STAGE_REJECTED               4U
-#define CANFD_RESULT_STAGE_ABORTED                5U
-#define CANFD_RESULT_STAGE_TIMEOUT                6U
-#define CANFD_RESULT_STAGE_FAILED                 7U
 
 #define CANFD_RESULT_OK                          0x00U
 #define CANFD_RESULT_UNSUPPORTED_COMMAND         0x01U
@@ -66,9 +60,7 @@
 #define CANFD_RESULT_NOT_CONTROL_OWNER           0x05U
 #define CANFD_RESULT_DATA_INVALID                0x08U
 #define CANFD_RESULT_DUPLICATE_MISMATCH           0x09U
-#define CANFD_RESULT_CONTROL_LOST                0x0AU
 #define CANFD_RESULT_INTERNAL_ERROR              0x0BU
-#define CANFD_RESULT_UNSUPPORTED_PARAMETER       0x0CU
 
 typedef struct
 {
@@ -88,6 +80,24 @@ typedef struct
   volatile uint8_t tail;
 } canfd_tx_queue_t;
 
+typedef struct
+{
+  uint8_t code;
+  motion_command_type_t type;
+  uint8_t session_required;
+} canfd_command_map_t;
+
+static const canfd_command_map_t canfd_command_map[] =
+{
+  {CANFD_COMMAND_RELEASE_CONTROL, MOTION_CMD_RELEASE, 1U},
+  {CANFD_COMMAND_ENABLE_MOTION, MOTION_CMD_ENABLE, 1U},
+  {CANFD_COMMAND_DISABLE_MOTION, MOTION_CMD_DISABLE, 1U},
+  {CANFD_COMMAND_STOP, MOTION_CMD_STOP, 0U},
+  {CANFD_COMMAND_ESTOP, MOTION_CMD_ESTOP, 0U},
+  {CANFD_COMMAND_FAULT_RESET, MOTION_CMD_CLEAR_FAULT, 1U},
+  {CANFD_COMMAND_RESET_ODOM, MOTION_CMD_RESET_ODOM, 1U}
+};
+
 static canfd_frame_t canfd_rx_queue[CANFD_RX_QUEUE_LENGTH];
 static canfd_frame_t
   canfd_tx_urgent_frames[CANFD_TX_URGENT_QUEUE_LENGTH];
@@ -104,7 +114,7 @@ static volatile uint32_t canfd_now_ms;
 static volatile uint32_t canfd_rx_arrival_order;
 static volatile uint32_t canfd_last_command_arrival_order;
 static volatile uint32_t canfd_last_processed_command_order;
-static volatile uint32_t canfd_accepted_velocity_order;
+static volatile uint32_t canfd_accepted_reference_order;
 static uint32_t canfd_host_session;
 static uint32_t canfd_last_lease_ms;
 static uint32_t canfd_last_busoff_recovery_ms;
@@ -134,8 +144,6 @@ static uint8_t canfd_tx_inflight;
 static uint8_t canfd_tx_link_fault_reported;
 static uint32_t canfd_tx_started_ms;
 static canfd_tx_queue_t *canfd_tx_active_queue;
-static canfd_magnetic_sample_t canfd_magnetic_sample;
-static volatile uint32_t canfd_magnetic_generation;
 static motion_reference_receiver_t canfd_motion_reference_receiver;
 static motion_reference_ingress_mailbox_t
   canfd_motion_reference_ingress;
@@ -180,11 +188,6 @@ static uint32_t canfd_get_u32(const uint8_t *data)
          ((uint32_t)data[1] << 8U) |
          ((uint32_t)data[2] << 16U) |
          ((uint32_t)data[3] << 24U);
-}
-
-static int16_t canfd_get_i16(const uint8_t *data)
-{
-  return (int16_t)canfd_get_u16(data);
 }
 
 static int32_t canfd_get_i32(const uint8_t *data)
@@ -294,17 +297,9 @@ static uint8_t canfd_result_code_from_error(motion_command_error_t error)
   {
     return CANFD_RESULT_OK;
   }
-  if(error == MOTION_COMMAND_ERROR_RANGE)
-  {
-    return CANFD_RESULT_OUT_OF_RANGE;
-  }
   if(error == MOTION_COMMAND_ERROR_BUSY)
   {
     return CANFD_RESULT_BUSY;
-  }
-  if(error == MOTION_COMMAND_ERROR_SESSION)
-  {
-    return CANFD_RESULT_NOT_CONTROL_OWNER;
   }
   if(error == MOTION_COMMAND_ERROR_UNSUPPORTED)
   {
@@ -314,14 +309,8 @@ static uint8_t canfd_result_code_from_error(motion_command_error_t error)
   {
     return CANFD_RESULT_INVALID_STATE;
   }
-  if(error == MOTION_COMMAND_ERROR_TIMEOUT)
-  {
-    return CANFD_RESULT_CONTROL_LOST;
-  }
   if((error == MOTION_COMMAND_ERROR_VERSION) ||
      (error == MOTION_COMMAND_ERROR_FORMAT) ||
-     (error == MOTION_COMMAND_ERROR_CRC) ||
-     (error == MOTION_COMMAND_ERROR_LENGTH) ||
      (error == MOTION_COMMAND_ERROR_SEQUENCE))
   {
     return CANFD_RESULT_DATA_INVALID;
@@ -355,42 +344,22 @@ static void canfd_send_result(uint32_t command_id,
 
 static void canfd_send_ack(uint32_t sequence,
                            uint32_t session_id,
-                           motion_command_type_t type,
-                           canfd_ack_status_t status,
+                           motion_command_handle_result_t result,
                            motion_command_error_t error,
-                           uint16_t fault_mask,
-                           uint8_t state)
+                           uint16_t fault_mask)
 {
-  uint8_t stage;
+  uint8_t stage = CANFD_RESULT_STAGE_REJECTED;
   uint8_t result_code = canfd_result_code_from_error(error);
   uint16_t detail_code = (error != MOTION_COMMAND_ERROR_NONE) ?
                          (uint16_t)error : fault_mask;
 
-  (void)type;
-  (void)state;
-  if(status == CANFD_ACK_RECEIVED)
+  if(result == MOTION_HANDLE_RECEIVED)
   {
     stage = CANFD_RESULT_STAGE_RECEIVED;
   }
-  else if(status == CANFD_ACK_ACCEPTED)
+  else if(result == MOTION_HANDLE_ACCEPTED)
   {
     stage = CANFD_RESULT_STAGE_ACCEPTED;
-  }
-  else if(status == CANFD_ACK_COMPLETED)
-  {
-    stage = CANFD_RESULT_STAGE_SUCCEEDED;
-  }
-  else if(status == CANFD_ACK_CANCELED)
-  {
-    stage = CANFD_RESULT_STAGE_ABORTED;
-  }
-  else if(status == CANFD_ACK_FAULT)
-  {
-    stage = CANFD_RESULT_STAGE_FAILED;
-  }
-  else
-  {
-    stage = CANFD_RESULT_STAGE_REJECTED;
   }
   canfd_send_result(sequence, session_id, stage, result_code, detail_code);
 }
@@ -404,24 +373,24 @@ static uint8_t canfd_submit_command(motion_command_t *command,
   error = motion_command_validate(command);
   if(error != MOTION_COMMAND_ERROR_NONE)
   {
-    canfd_send_ack(command->sequence, command->session_id, command->type,
-                   CANFD_ACK_REJECTED, error, 0U, 0U);
+    canfd_send_ack(command->sequence, command->session_id,
+                   MOTION_HANDLE_REJECTED, error, 0U);
     return 0U;
   }
   if((session_required != 0U) &&
      ((canfd_session_valid == 0U) ||
       (command->session_id != canfd_host_session)))
   {
-    canfd_send_ack(command->sequence, command->session_id, command->type,
-                   CANFD_ACK_REJECTED, MOTION_COMMAND_ERROR_SESSION,
-                   0U, 0U);
+    canfd_send_result(command->sequence, command->session_id,
+                      CANFD_RESULT_STAGE_REJECTED,
+                      CANFD_RESULT_NOT_CONTROL_OWNER, 0U);
     return 0U;
   }
   if(canfd_motion_handler == NULL)
   {
-    canfd_send_ack(command->sequence, command->session_id, command->type,
-                   CANFD_ACK_REJECTED, MOTION_COMMAND_ERROR_UNSUPPORTED,
-                   0U, 0U);
+    canfd_send_ack(command->sequence, command->session_id,
+                   MOTION_HANDLE_REJECTED,
+                   MOTION_COMMAND_ERROR_UNSUPPORTED, 0U);
     return 0U;
   }
 
@@ -447,10 +416,8 @@ static uint8_t canfd_submit_command(motion_command_t *command,
       motion_reference_receiver_invalidate_latest(
           &canfd_motion_reference_receiver);
     }
-    canfd_send_ack(command->sequence, command->session_id, command->type,
-                   (result == MOTION_HANDLE_RECEIVED) ?
-                   CANFD_ACK_RECEIVED : CANFD_ACK_ACCEPTED,
-                   MOTION_COMMAND_ERROR_NONE, 0U, 0U);
+    canfd_send_ack(command->sequence, command->session_id, result,
+                   MOTION_COMMAND_ERROR_NONE, 0U);
     return 1U;
   }
   canfd_protocol_send_motion_result(command, result, 0U, 0U);
@@ -535,7 +502,7 @@ static void canfd_accept_claim(uint32_t command_id,
     canfd_last_command_session = session_id;
     motion_reference_receiver_reset(&canfd_motion_reference_receiver,
                                     session_id);
-    canfd_accepted_velocity_order = 0UL;
+    canfd_accepted_reference_order = 0UL;
   }
   canfd_host_session = session_id;
   canfd_session_valid = 1U;
@@ -552,10 +519,11 @@ static void canfd_accept_claim(uint32_t command_id,
 static void canfd_parse_command(const canfd_frame_t *frame)
 {
   motion_command_t command;
+  const canfd_command_map_t *entry = NULL;
   uint32_t command_id;
   uint32_t session_id;
   uint8_t command_code;
-  uint8_t session_required = 1U;
+  uint8_t index;
 
   if(frame->data_size != 32U)
   {
@@ -610,19 +578,16 @@ static void canfd_parse_command(const canfd_frame_t *frame)
   command.sequence = command_id;
   command.session_id = session_id;
   command.source = MOTION_SOURCE_CANFD;
-  if(command_code == CANFD_COMMAND_RELEASE_CONTROL)
+  for(index = 0U; index < (uint8_t)(sizeof(canfd_command_map) /
+                                    sizeof(canfd_command_map[0])); index++)
   {
-    command.type = MOTION_CMD_RELEASE;
+    if(canfd_command_map[index].code == command_code)
+    {
+      entry = &canfd_command_map[index];
+      break;
+    }
   }
-  else if(command_code == CANFD_COMMAND_ENABLE_MOTION)
-  {
-    command.type = MOTION_CMD_ENABLE;
-  }
-  else if(command_code == CANFD_COMMAND_DISABLE_MOTION)
-  {
-    command.type = MOTION_CMD_DISABLE;
-  }
-  else if(command_code == CANFD_COMMAND_GOTO_REL)
+  if(entry == NULL)
   {
     canfd_send_result(command_id, session_id,
                       CANFD_RESULT_STAGE_REJECTED,
@@ -630,51 +595,8 @@ static void canfd_parse_command(const canfd_frame_t *frame)
                       command_code);
     return;
   }
-  else if(command_code == CANFD_COMMAND_FOLLOW_MAG_START)
-  {
-    /* Magnetic motion is produced by Supervisor and arrives only on 0x401. */
-    canfd_send_result(command_id, session_id,
-                      CANFD_RESULT_STAGE_REJECTED,
-                      CANFD_RESULT_UNSUPPORTED_COMMAND,
-                      command_code);
-    return;
-  }
-  else if(command_code == CANFD_COMMAND_STOP)
-  {
-    command.type = MOTION_CMD_STOP;
-    session_required = 0U;
-  }
-  else if(command_code == CANFD_COMMAND_ESTOP)
-  {
-    command.type = MOTION_CMD_ESTOP;
-    session_required = 0U;
-  }
-  else if(command_code == CANFD_COMMAND_FAULT_RESET)
-  {
-    command.type = MOTION_CMD_CLEAR_FAULT;
-  }
-  else if(command_code == CANFD_COMMAND_RESET_ODOM)
-  {
-    command.type = MOTION_CMD_RESET_ODOM;
-  }
-  else
-  {
-    canfd_send_result(command_id, session_id,
-                      CANFD_RESULT_STAGE_REJECTED,
-                      CANFD_RESULT_UNSUPPORTED_COMMAND,
-                      command_code);
-    return;
-  }
-
-  if((session_required != 0U) &&
-     (canfd_session_matches(session_id) == 0U))
-  {
-    canfd_send_result(command_id, session_id,
-                      CANFD_RESULT_STAGE_REJECTED,
-                      CANFD_RESULT_NOT_CONTROL_OWNER, 0U);
-    return;
-  }
-  (void)canfd_submit_command(&command, session_required);
+  command.type = entry->type;
+  (void)canfd_submit_command(&command, entry->session_required);
 }
 
 static void canfd_parse_lease(const canfd_frame_t *frame)
@@ -712,7 +634,7 @@ static void canfd_parse_lease(const canfd_frame_t *frame)
   canfd_comm_timeout_reported = 0U;
 }
 
-static void canfd_parse_velocity(const canfd_frame_t *frame)
+static void canfd_parse_motion_reference(const canfd_frame_t *frame)
 {
   uint32_t elapsed_ms;
   uint16_t lease_remaining_ms;
@@ -739,65 +661,14 @@ static void canfd_parse_velocity(const canfd_frame_t *frame)
       lease_remaining_ms);
   if(result == MOTION_REFERENCE_RECEIVER_ACCEPTED)
   {
-    canfd_accepted_velocity_order = frame->arrival_order;
+    canfd_accepted_reference_order = frame->arrival_order;
   }
   /* Chassis consumption remains gated by ARM, faults and the safe getter. */
 }
 
-static void canfd_parse_magnetic(const canfd_frame_t *frame)
-{
-  canfd_magnetic_sample_t sample;
-  uint32_t interrupt_state;
-  uint8_t index;
-
-  if(frame->data_size != 48U)
-  {
-    return;
-  }
-
-  memset(&sample, 0, sizeof(sample));
-  sample.sample_time_ms = canfd_get_u32(&frame->data[0]);
-  sample.receive_time_ms = canfd_now_ms;
-  sample.sequence = canfd_get_u16(&frame->data[4]);
-  sample.status = frame->data[6];
-  sample.flags = frame->data[7];
-  sample.active_mask = canfd_get_u16(&frame->data[8]);
-  sample.offset_x10mm = canfd_get_i16(&frame->data[10]);
-  sample.strength = canfd_get_u16(&frame->data[12]);
-  sample.width_x10mm = canfd_get_u16(&frame->data[14]);
-  for(index = 0U; index < 8U; index++)
-  {
-    sample.signal[index] = canfd_get_u16(&frame->data[32U + (index * 2U)]);
-  }
-  sample.protocol_valid = ((sample.status <= 3U) &&
-                           ((sample.flags & 0xF8U) == 0U) &&
-                           ((sample.active_mask & 0xFF00U) == 0U)) ? 1U : 0U;
-  sample.received = 1U;
-
-  /*
-   * CAN任务优先级低于控制任务，发布半帧时若被抢占，读端无法等待写端完成。
-   * 极短临界区只覆盖RAM快照复制，避免把合法磁帧误判为持续丢失。
-   */
-  interrupt_state = __get_PRIMASK();
-  __disable_irq();
-  canfd_magnetic_generation++;
-  __DMB();
-  canfd_magnetic_sample = sample;
-  __DMB();
-  canfd_magnetic_generation++;
-  if(interrupt_state == 0UL)
-  {
-    __enable_irq();
-  }
-}
-
 static void canfd_parse_frame(const canfd_frame_t *frame)
 {
-  if(frame->id == CANFD_ID_MAGNETIC_TPDO1)
-  {
-    canfd_parse_magnetic(frame);
-  }
-  else if(frame->id == CANFD_ID_CHASSIS_COMMAND)
+  if(frame->id == CANFD_ID_CHASSIS_COMMAND)
   {
     canfd_parse_command(frame);
   }
@@ -805,9 +676,9 @@ static void canfd_parse_frame(const canfd_frame_t *frame)
   {
     canfd_parse_lease(frame);
   }
-  else if(frame->id == CANFD_ID_VELOCITY)
+  else if(frame->id == CANFD_ID_MOTION_REFERENCE)
   {
-    canfd_parse_velocity(frame);
+    canfd_parse_motion_reference(frame);
   }
 }
 
@@ -906,7 +777,7 @@ static void canfd_check_timeouts_and_bus(void)
     {
       motion_reference_receiver_invalidate_latest(
           &canfd_motion_reference_receiver);
-      canfd_accepted_velocity_order = 0UL;
+      canfd_accepted_reference_order = 0UL;
       canfd_busoff_reported = 1U;
       canfd_submit_internal_fault(MOTION_CMD_CAN_BUSOFF);
     }
@@ -930,7 +801,7 @@ static void canfd_check_timeouts_and_bus(void)
     canfd_session_valid = 0U;
     canfd_lease_counter_valid = 0U;
     motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
-    canfd_accepted_velocity_order = 0UL;
+    canfd_accepted_reference_order = 0UL;
     if((canfd_motion_session_active != 0U) &&
        (canfd_comm_timeout_reported == 0U))
     {
@@ -1084,7 +955,7 @@ void canfd_protocol_init(motion_command_handler_t handler, void *context)
   canfd_rx_arrival_order = 0UL;
   canfd_last_command_arrival_order = 0UL;
   canfd_last_processed_command_order = 0UL;
-  canfd_accepted_velocity_order = 0UL;
+  canfd_accepted_reference_order = 0UL;
   canfd_host_session = 0UL;
   canfd_last_lease_ms = 0UL;
   canfd_last_busoff_recovery_ms = 0UL;
@@ -1114,8 +985,6 @@ void canfd_protocol_init(motion_command_handler_t handler, void *context)
   canfd_tx_link_fault_reported = 0U;
   canfd_tx_started_ms = 0UL;
   canfd_tx_active_queue = NULL;
-  memset(&canfd_magnetic_sample, 0, sizeof(canfd_magnetic_sample));
-  canfd_magnetic_generation = 0UL;
   motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
   motion_reference_ingress_mailbox_reset(
       &canfd_motion_reference_ingress);
@@ -1125,16 +994,16 @@ void canfd_protocol_init(motion_command_handler_t handler, void *context)
 void canfd_protocol_poll(uint32_t now_ms)
 {
   canfd_frame_t frame;
-  canfd_frame_t velocity_frame;
-  motion_reference_ingress_t velocity_ingress;
+  canfd_frame_t reference_frame;
+  motion_reference_ingress_t reference_ingress;
   uint8_t processed = 0U;
-  uint8_t velocity_available;
+  uint8_t reference_available;
   uint8_t barrier_valid = 0U;
   uint32_t barrier_order = 0UL;
 
   canfd_now_ms = now_ms;
-  velocity_available = motion_reference_ingress_mailbox_take(
-      &canfd_motion_reference_ingress, &velocity_ingress);
+  reference_available = motion_reference_ingress_mailbox_take(
+      &canfd_motion_reference_ingress, &reference_ingress);
   while((processed < CANFD_RX_QUEUE_LENGTH) &&
         (canfd_rx_queue_pop(&frame) != 0U))
   {
@@ -1147,23 +1016,23 @@ void canfd_protocol_poll(uint32_t now_ms)
     canfd_parse_frame(&frame);
     processed++;
   }
-  if((velocity_available != 0U) &&
+  if((reference_available != 0U) &&
      (canfd_last_processed_command_order ==
       canfd_last_command_arrival_order) &&
      (motion_reference_is_after_barrier(
-          velocity_ingress.arrival_order,
+          reference_ingress.arrival_order,
           barrier_order,
           barrier_valid) != 0U))
   {
-    memset(&velocity_frame, 0, sizeof(velocity_frame));
-    velocity_frame.arrival_order = velocity_ingress.arrival_order;
-    velocity_frame.receive_ms = velocity_ingress.receive_ms;
-    velocity_frame.id = CANFD_ID_VELOCITY;
-    velocity_frame.data_length = CAN_DLC_BYTES_16;
-    velocity_frame.data_size = AGV_MOTION_REFERENCE_PAYLOAD_SIZE;
-    memcpy(velocity_frame.data, velocity_ingress.payload,
+    memset(&reference_frame, 0, sizeof(reference_frame));
+    reference_frame.arrival_order = reference_ingress.arrival_order;
+    reference_frame.receive_ms = reference_ingress.receive_ms;
+    reference_frame.id = CANFD_ID_MOTION_REFERENCE;
+    reference_frame.data_length = CAN_DLC_BYTES_16;
+    reference_frame.data_size = AGV_MOTION_REFERENCE_PAYLOAD_SIZE;
+    memcpy(reference_frame.data, reference_ingress.payload,
            AGV_MOTION_REFERENCE_PAYLOAD_SIZE);
-    canfd_parse_frame(&velocity_frame);
+    canfd_parse_frame(&reference_frame);
   }
   canfd_check_timeouts_and_bus();
   canfd_transmit_one();
@@ -1195,14 +1064,16 @@ void canfd_protocol_rx_irq_handler(void)
     {
       canfd_rx_drop_count++;
     }
-    else
+    else if((rx.id == CANFD_ID_MOTION_REFERENCE) ||
+            (rx.id == CANFD_ID_CHASSIS_COMMAND) ||
+            (rx.id == CANFD_ID_CONTROL_LEASE))
     {
       arrival_order = ++canfd_rx_arrival_order;
       if(arrival_order == 0UL)
       {
         arrival_order = ++canfd_rx_arrival_order;
       }
-      if(rx.id == CANFD_ID_VELOCITY)
+      if(rx.id == CANFD_ID_MOTION_REFERENCE)
       {
         if(data_size == AGV_MOTION_REFERENCE_PAYLOAD_SIZE)
         {
@@ -1267,24 +1138,15 @@ void canfd_protocol_send_motion_result(
     uint16_t fault_mask,
     uint8_t state)
 {
-  canfd_ack_status_t status;
   motion_command_error_t error = MOTION_COMMAND_ERROR_NONE;
 
   if((command == NULL) || (command->source != MOTION_SOURCE_CANFD))
   {
     return;
   }
-  if(result == MOTION_HANDLE_RECEIVED)
+  if((result != MOTION_HANDLE_RECEIVED) &&
+     (result != MOTION_HANDLE_ACCEPTED))
   {
-    status = CANFD_ACK_RECEIVED;
-  }
-  else if(result == MOTION_HANDLE_ACCEPTED)
-  {
-    status = CANFD_ACK_ACCEPTED;
-  }
-  else
-  {
-    status = CANFD_ACK_REJECTED;
     error = (result == MOTION_HANDLE_BUSY) ?
             MOTION_COMMAND_ERROR_BUSY :
             ((fault_mask != 0U) ? MOTION_COMMAND_ERROR_FAULT_LOCKED :
@@ -1295,44 +1157,22 @@ void canfd_protocol_send_motion_result(
     }
   }
   canfd_send_ack(command->sequence, command->session_id,
-                 command->type, status, error,
-                 fault_mask, state);
+                 result, error, fault_mask);
+  (void)state;
   if(result == MOTION_HANDLE_ACCEPTED)
   {
-    if(command->type == MOTION_CMD_FOLLOW_MAG)
-    {
-      canfd_send_result(command->sequence, command->session_id,
-                        CANFD_RESULT_STAGE_EXECUTING,
-                        CANFD_RESULT_OK, 0U);
-    }
-    else
-    {
-      canfd_send_result(command->sequence, command->session_id,
-                        CANFD_RESULT_STAGE_SUCCEEDED,
-                        CANFD_RESULT_OK, 0U);
-    }
+    canfd_send_result(command->sequence, command->session_id,
+                      CANFD_RESULT_STAGE_SUCCEEDED,
+                      CANFD_RESULT_OK, 0U);
     if(motion_command_releases_session(command->type, result) != 0U)
     {
       canfd_session_valid = 0U;
       canfd_motion_session_active = 0U;
       canfd_lease_counter_valid = 0U;
       motion_reference_receiver_reset(&canfd_motion_reference_receiver, 0U);
-      canfd_accepted_velocity_order = 0UL;
+      canfd_accepted_reference_order = 0UL;
     }
   }
-}
-
-void canfd_protocol_send_command_event(
-    uint32_t sequence,
-    uint32_t session_id,
-    motion_command_type_t type,
-    canfd_ack_status_t status,
-    motion_command_error_t error,
-    uint16_t fault_mask,
-    uint8_t state)
-{
-  canfd_send_ack(sequence, session_id, type, status, error,
-                 fault_mask, state);
 }
 
 void canfd_protocol_send_drive_status(const canfd_drive_status_t *status)
@@ -1490,47 +1330,6 @@ uint32_t canfd_protocol_get_tx_drop_count(void)
   return canfd_tx_drop_count;
 }
 
-uint8_t canfd_protocol_get_magnetic_sample(
-    canfd_magnetic_sample_t *sample)
-{
-  canfd_magnetic_sample_t snapshot;
-  uint32_t generation_before;
-  uint32_t generation_after;
-  uint8_t attempt;
-
-  if(sample == NULL)
-  {
-    return 0U;
-  }
-  for(attempt = 0U; attempt < 3U; attempt++)
-  {
-    generation_before = canfd_magnetic_generation;
-    if((generation_before & 1UL) != 0UL)
-    {
-      continue;
-    }
-    __DMB();
-    snapshot = canfd_magnetic_sample;
-    __DMB();
-    generation_after = canfd_magnetic_generation;
-    if((generation_before == generation_after) &&
-       ((generation_after & 1UL) == 0UL))
-    {
-      if(snapshot.received == 0U)
-      {
-        return 0U;
-      }
-      snapshot.age_ms = (uint16_t)(((canfd_now_ms -
-                                     snapshot.receive_time_ms) > 65535UL) ?
-                                   65535UL :
-                                   (canfd_now_ms - snapshot.receive_time_ms));
-      *sample = snapshot;
-      return 1U;
-    }
-  }
-  return 0U;
-}
-
 uint8_t canfd_protocol_get_motion_reference(
     agv_motion_reference_t *reference)
 {
@@ -1550,7 +1349,7 @@ uint8_t canfd_protocol_get_motion_reference(
     return 0U;
   }
   barrier_before = canfd_last_command_arrival_order;
-  accepted_before = canfd_accepted_velocity_order;
+  accepted_before = canfd_accepted_reference_order;
   now_ms = canfd_now_ms;
   if(motion_reference_receiver_get_latest(
        &canfd_motion_reference_receiver, now_ms, &snapshot) == 0U)
@@ -1560,7 +1359,7 @@ uint8_t canfd_protocol_get_motion_reference(
   __DMB();
   barrier_after = canfd_last_command_arrival_order;
   processed_after = canfd_last_processed_command_order;
-  accepted_after = canfd_accepted_velocity_order;
+  accepted_after = canfd_accepted_reference_order;
   session_valid = canfd_session_valid;
   motion_active = canfd_motion_session_active;
   busoff = (CAN3->ctrlstat_bit.busoff != 0U) ? 1U : 0U;

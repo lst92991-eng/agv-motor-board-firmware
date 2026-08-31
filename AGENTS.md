@@ -18,7 +18,7 @@
 - AT8236双路PWM、电机方向和主动制动；
 - 左右AB编码器、速度PI闭环和里程计；
 - BMI270相对航向和Z轴角速度；
-- 前进、后退、原地左右旋转、磁条循迹；
+- 唯一短TTL车体速度参考的差速执行；
 - 四路防撞条本地锁存停车；
 - CAN FD控制租约、命令状态机、总线故障停车；
 - 调试串口和CAN FD诊断遥测。
@@ -36,26 +36,28 @@ Linux/RK3576 Supervisor负责非实时决策，只能通过正式CAN FD运动接
 - 防撞条：PC15前、PC13后、PC14左、PB9右。
 - 双VL53L0X：PB13/PB14软件I2C，左/右XSHUT为PB11/PA11。
 - IRM-H238T红外接收：PA8，38kHz，输出为单路数字电平。
-- PN532：USART5 PB5/PB6，3.3V HSU。
+- PN532硬件预留：USART5 PB5/PB6，3.3V HSU；当前无生产驱动。
 
 # 正式运行结构
 
 - `ChassisCtrl`：优先级5，10ms；唯一允许修改底盘运动状态。
 - `SerialComm`：优先级3，2ms；调试串口协议入口。
 - `CANFD`：优先级3，2ms；CAN帧收发和200ms控制租约。
+- `PowerMonitor`：优先级2，20ms；电流/母线监督和本地故障提交。
 - `DockSensors`：优先级2，阻塞式双TOF采样和`0x582`对接遥测。
+- `Watchdog`：优先级1，20ms；Control/CAN/Power均有进展才喂狗。
 - `MotionCmdQ`：8项静态队列；ESTOP、通信超时、bus-off、STOP走优先安全通道。
 - ISR只采样和置位，不执行阻塞通信、日志或运动控制。
 
 # 生产与预留能力边界
 
-已经实车验收并处于正式链路：电机、编码器、速度环、IMU、四方向运动、磁循迹、
-CAN FD、串口、防撞和失联停车。
+历史实车已验收电机、编码器、速度环、IMU、四方向、磁路线、CAN FD、防撞和失联
+停车；本次统一参考重构目前只通过软件构建/主机门，仍需重新烧录回归。
 
 正式控制边界：
 
-- `chassis_motion_controller.*`只负责任务状态机、安全联动和最终轮速目标；
-- `magnetic_follow_controller.*`负责可主机测试的磁样本质量、偏移外环和动态限速；
+- `chassis_motion_controller.*`只负责0x401执行、本地安全、里程计和遥测；
+- 磁质量与偏移控制只属于Supervisor producer，电机板不得恢复第二算法；
 - `canfd_protocol.*`负责CAN硬件、命令会话和租约；
 - `canfd_status_codec.*`负责可主机测试的状态PDO字节布局。
 
@@ -64,18 +66,16 @@ CAN FD、串口、防撞和失联停车。
 - `dock_tof_sensor.*`：双TOF初始化、滤波、左右几何误差和`0x582`遥测；
 - `dock_ir_receiver.*`：PA8下降沿、100ms活动窗口和`0x581/0x582`遥测。
 
-已经沉淀为驱动/数据接口，但尚未接入正式任务：
+已接入但仍保持失败关闭：`power_supervisor.*`、`adc_monitor.*`和
+`motor_current.*`。未经现场标定时`limits_approved=0`，禁止ENABLE。
 
-- `pn532_uart5.*`、`rfid_record.*`：RFID底层协议和记录格式；
-- `adc_monitor.*`、`motor_current.*`：ADC采集基础模块。
-
-不得把上述预留能力写成“整车已具备”。充电对准状态机、红外扫描、TOF闭环、RFID
-定位任务和ADC安全阈值仍需单独实现并实车验收。
+PN532/RFID当前不在生产树；以后只能产生带时间戳/序号的事件交给Supervisor，禁止
+直接ENABLE、STOP、设轮速或PWM。充电对准、TOF闭环和电流环仍需单独实车验收。
 
 # 安全红线
 
 - 电机目标转速不超过75RPM；修改标定参数必须重新做架空、四方向和循迹回归。
-- 防撞、ESTOP、CAN bus-off、租约超时、IMU故障、磁条丢失和任务超时必须停车。
+- 防撞、ESTOP、CAN bus-off、租约/Reference超时、IMU或电气故障必须停车。
 - 单个红外电平没有方向和距离信息，禁止直接触发车辆运动。
 - 双TOF初始化和单次测距会阻塞，只能由未来低优先级传感器任务独占调用，禁止放入
   10ms底盘任务或中断。
@@ -86,7 +86,8 @@ CAN FD、串口、防撞和失联停车。
 - `src/`只放正式模块，不再放`*_test.c`、临时运动脚本或按宏切换的测试入口。
 - 纯算法测试放`tests/`；硬件制造诊断如确需恢复，建立独立Keil Target，不得混入
   生产`main.c`。
-- 保持驱动、协议、应用状态机分层；CAN/UART协议统一转成`motion_command_t`。
+- 保持驱动、协议、参考执行器分层；CAN/UART管理命令统一转成`motion_command_t`。
+- 非安全运动只能来自0x401；维护串口只允许STOP/ESTOP。
 - 协议字段、寄存器、时间、距离、速度和角度使用固定宽度类型并明确单位。
 - 禁止提交`objects/`、`listings/`、`.bin/.hex/.map/.log`、缓存或SDK副本。
 - Keil项目：`mdk_v5/agv_motor.uvprojx`，ARMCC 5.06 update 7，要求0错误0警告。

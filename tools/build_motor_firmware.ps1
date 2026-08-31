@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch]$Rebuild)
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $projectPath = Join-Path $repoRoot 'mdk_v5\agv_motor.uvprojx'
@@ -16,7 +16,8 @@ foreach($requiredPath in @($projectPath, $uv4Path, $fromelfPath)) {
   }
 }
 
-$arguments = @('-b', $projectPath, '-j0', '-o', $buildLog)
+$buildMode = if($Rebuild) { '-r' } else { '-b' }
+$arguments = @($buildMode, $projectPath, '-j0', '-o', $buildLog)
 $process = Start-Process -FilePath $uv4Path `
   -ArgumentList $arguments `
   -Wait `

@@ -11,14 +11,14 @@
 extern "C" {
 #endif
 
-/* 初始化双电机速度环、编码器、BMI270和底盘状态。 */
+/* 初始化速度环、编码器、BMI270、累计里程计和本地安全状态。 */
 void chassis_motion_controller_init(void);
 
-/* 由底盘控制任务处理一条已从队列取出的统一运动命令。 */
+/* 只处理使能/停车/释放/复位和本地故障；运动量唯一来自0x401。 */
 motion_command_handle_result_t chassis_motion_controller_handle_command(
     const motion_command_t *command);
 
-/* 由最高优先级控制任务每10ms调用一次。 */
+/* 由最高优先级任务每10ms更新安全、IMU、里程计和参考执行器。 */
 void chassis_motion_controller_step_10ms(void);
 
 /* CAN FD应答和状态上报读取的只读状态。 */

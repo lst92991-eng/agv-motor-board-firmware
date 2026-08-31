@@ -1,5 +1,10 @@
 # 电机驱动板生产能力基线
 
+> **OBSOLETE / 历史证据。** 本文描述2026-08-19固件，不再是当前生产架构合同。
+> 当前权威规则见 `D:/AGV/docs/architecture/vehicle-control-freeze.md` 和
+> `D:/AGV/docs/AGV_CANopen_FD_Protocol_V0.2.md`；本文中的GOTO、板端磁控制器、
+> PWM助推和RFID预留源码均不得恢复为生产入口。
+
 日期：2026-08-19
 
 ## 1. 目的

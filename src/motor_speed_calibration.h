@@ -17,10 +17,6 @@
 /* 前馈保留实车低速克服静摩擦所需的偏置，PI只补偿负载和个体差异。 */
 #define MOTOR_SPEED_FEED_FORWARD_PER_RPM               9.4f
 #define MOTOR_SPEED_FEED_FORWARD_STATIC_PWM          100.0f
-/* 加速保持柔和；弯前减速必须快速撤掉旧PWM，避免目标已降速但车辆继续冲行。 */
-#define MOTOR_SPEED_PWM_SLEW_PER_CYCLE                12.0f
-#define MOTOR_SPEED_PWM_DECEL_SLEW_PER_CYCLE          80.0f
-
 /* 20ms、2640 count/rev时单个计数约为1.14RPM。 */
 #define MOTOR_SPEED_FILTER_ALPHA                       0.20f
 
@@ -33,25 +29,12 @@
 #define MOTOR_SPEED_RIGHT_PID_KD                       0.0f
 #define MOTOR_SPEED_PID_CORRECTION_LIMIT             250.0f
 
-/* 启动助推只用于克服静摩擦；检测到转动后尽快退出，最长400ms。 */
-#define MOTOR_SPEED_START_BOOST_MIN_PWM              180.0f
-#define MOTOR_SPEED_START_BOOST_EXTRA_PWM             60.0f
-#define MOTOR_SPEED_START_BOOST_MAX_PWM              350.0f
-#define MOTOR_SPEED_START_BOOST_TOTAL_CYCLES           20U
-#define MOTOR_SPEED_START_BOOST_MIN_CYCLES              5U
-#define MOTOR_SPEED_START_BOOST_READY_CYCLES            2U
-#define MOTOR_SPEED_START_BOOST_EXIT_RPM                5.0f
-
-/* 堵转200ms后仅允许一次600ms脱困增扭，失败后归零等待底盘锁存停车。 */
+/* 目标存在但200ms无反馈时只锁存停车，不执行PWM脱困。 */
 #define MOTOR_SPEED_STALL_TARGET_MIN_RPM                 8.0f
 #define MOTOR_SPEED_STALL_MEASURED_MAX_RPM               1.0f
-#define MOTOR_SPEED_STALL_RELEASE_RPM                    3.0f
-#define MOTOR_SPEED_STALL_PWM_THRESHOLD                350.0f
-#define MOTOR_SPEED_STALL_RECOVERY_START_PWM           700.0f
-#define MOTOR_SPEED_STALL_RECOVERY_MAX_PWM            1000.0f
-#define MOTOR_SPEED_STALL_RECOVERY_SLEW_PWM             30.0f
 #define MOTOR_SPEED_STALL_DETECT_CYCLES                 10U
-#define MOTOR_SPEED_STALL_RECOVERY_CYCLES               30U
+#define MOTOR_SPEED_REVERSE_ZERO_RPM                      1.0f
+#define MOTOR_SPEED_REVERSE_ZERO_SAMPLES                    3U
 
 /*
  * 左右反馈符号来自实车方向验收。两个电机安装方向相反，正式控制层已经统一为

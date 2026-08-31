@@ -449,11 +449,6 @@
               <FilePath>..\src\chassis_heading_fusion.c</FilePath>
             </File>
             <File>
-              <FileName>magnetic_follow_controller.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\magnetic_follow_controller.c</FilePath>
-            </File>
-            <File>
               <FileName>imu_heading.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\imu_heading.c</FilePath>
@@ -517,16 +512,6 @@
               <FileName>dock_ir_receiver.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\dock_ir_receiver.c</FilePath>
-            </File>
-            <File>
-              <FileName>pn532_uart5.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\pn532_uart5.c</FilePath>
-            </File>
-            <File>
-              <FileName>rfid_record.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\rfid_record.c</FilePath>
             </File>
             <File>
               <FileName>bumper_input.c</FileName>
