@@ -80,6 +80,9 @@ uint8_t canfd_status_encode_odom(
   canfd_status_put_i32(&payload[16], status->yaw_cdeg);
   canfd_status_put_i16(&payload[20], status->linear_mm_s);
   canfd_status_put_i16(&payload[22], status->yaw_rate_cdeg_s);
+  canfd_status_put_i16(&payload[24], status->accel_x_mg);
+  canfd_status_put_i16(&payload[26], status->accel_y_mg);
+  canfd_status_put_i16(&payload[28], status->accel_z_mg);
   return 1U;
 }
 
@@ -158,5 +161,28 @@ uint8_t canfd_status_encode_dock(
   payload[22] = status->left_range_status;
   payload[23] = status->right_range_status;
   canfd_status_put_i32(&payload[24], status->bus_error);
+  canfd_status_put_u16(&payload[28], status->left_raw_mm);
+  canfd_status_put_u16(&payload[30], status->right_raw_mm);
+  return 1U;
+}
+
+uint8_t canfd_status_encode_dock_scan(
+    const canfd_dock_scan_t *status,
+    uint8_t *payload,
+    size_t capacity)
+{
+  if((status == NULL) || (payload == NULL) ||
+     (capacity < CANFD_DOCK_SCAN_PAYLOAD_SIZE))
+  {
+    return 0U;
+  }
+  memset(payload, 0, CANFD_DOCK_SCAN_PAYLOAD_SIZE);
+  canfd_status_put_u32(&payload[0], status->sample_sequence);
+  canfd_status_put_u32(&payload[4], status->sample_time_ms);
+  canfd_status_put_u16(&payload[8], status->left_raw_mm);
+  canfd_status_put_u16(&payload[10], status->right_raw_mm);
+  payload[12] = status->flags;
+  payload[13] = status->left_range_status;
+  payload[14] = status->right_range_status;
   return 1U;
 }

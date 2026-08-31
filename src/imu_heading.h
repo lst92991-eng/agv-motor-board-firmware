@@ -31,6 +31,11 @@ float imu_heading_get_filtered_rate_dps(void);
 /* 读取本次上电根据静止噪声计算出的动态死区。 */
 float imu_heading_get_deadband_dps(void);
 
+/* 读取扣除上电静止重力基线后的车体水平加速度，单位为 mg。 */
+int16_t imu_heading_get_linear_accel_x_mg(void);
+int16_t imu_heading_get_linear_accel_y_mg(void);
+int16_t imu_heading_get_linear_accel_z_mg(void);
+
 /* 返回最近一次初始化或采样结果。 */
 int8_t imu_heading_get_status(void);
 

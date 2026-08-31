@@ -420,36 +420,14 @@ void magnetic_follow_controller_start(
   }
 }
 
-void magnetic_follow_controller_update(
+static void magnetic_follow_update_offset_rate(
     magnetic_follow_controller_t *controller,
     const magnetic_follow_sample_t *sample,
-    float requested_run_rpm,
-    float actual_yaw_rate_dps)
+    float offset_error_mm)
 {
-  float offset_error_mm;
-  float controlled_error_mm;
-  float absolute_offset_mm;
-  float minimum_speed_rpm;
   float offset_rate_filter_alpha;
-  float proportional_term_dps;
-  float rate_term_dps;
   float raw_offset_rate_mm_s;
-  float speed_limit_target_rpm;
-  float speed_limit_step_rpm;
-  float yaw_rate_limit_dps;
   uint32_t sample_interval_ms;
-
-  if((controller == NULL) || (sample == NULL))
-  {
-    return;
-  }
-
-  controller->offset_x10mm = sample->offset_x10mm;
-  controller->strength = sample->strength;
-  controller->age_ms = sample->age_ms;
-  controller->actual_yaw_rate_dps = actual_yaw_rate_dps;
-  offset_error_mm = ((float)sample->offset_x10mm -
-                     (float)controller->target_offset_x10mm) / 10.0f;
 
   if((controller->sequence_valid != 0U) &&
      (sample->sequence != controller->last_sequence))
@@ -485,6 +463,16 @@ void magnetic_follow_controller_update(
     controller->offset_rate_mm_s = 0.0f;
     controller->sequence_valid = 1U;
   }
+}
+
+static void magnetic_follow_update_yaw_target(
+    magnetic_follow_controller_t *controller,
+    float offset_error_mm)
+{
+  float controlled_error_mm;
+  float proportional_term_dps;
+  float rate_term_dps;
+  float yaw_rate_limit_dps;
 
   if(offset_error_mm > MAG_FOLLOW_OFFSET_DEADBAND_MM)
   {
@@ -543,9 +531,17 @@ void magnetic_follow_controller_update(
       controller->yaw_rate_target_dps,
       -yaw_rate_limit_dps,
       yaw_rate_limit_dps);
+}
 
-  magnetic_follow_update_adaptive_speed_phase(controller,
-                                               offset_error_mm);
+static void magnetic_follow_update_speed_limit(
+    magnetic_follow_controller_t *controller,
+    float offset_error_mm,
+    float requested_run_rpm)
+{
+  float absolute_offset_mm;
+  float minimum_speed_rpm;
+  float speed_limit_target_rpm;
+  float speed_limit_step_rpm;
 
   absolute_offset_mm = magnetic_follow_abs_float(offset_error_mm);
   if(controller->adaptive_high_speed != 0U)
@@ -577,6 +573,7 @@ void magnetic_follow_controller_update(
             MAG_FOLLOW_FULL_SPEED_OFFSET_MM));
     }
   }
+
   if((controller->adaptive_high_speed != 0U) &&
      (speed_limit_target_rpm < controller->speed_limit_rpm))
   {
@@ -600,6 +597,35 @@ void magnetic_follow_controller_update(
         minimum_speed_rpm,
         requested_run_rpm);
   }
+}
+
+void magnetic_follow_controller_update(
+    magnetic_follow_controller_t *controller,
+    const magnetic_follow_sample_t *sample,
+    float requested_run_rpm,
+    float actual_yaw_rate_dps)
+{
+  float offset_error_mm;
+
+  if((controller == NULL) || (sample == NULL))
+  {
+    return;
+  }
+
+  controller->offset_x10mm = sample->offset_x10mm;
+  controller->strength = sample->strength;
+  controller->age_ms = sample->age_ms;
+  controller->actual_yaw_rate_dps = actual_yaw_rate_dps;
+  offset_error_mm = ((float)sample->offset_x10mm -
+                     (float)controller->target_offset_x10mm) / 10.0f;
+
+  magnetic_follow_update_offset_rate(controller, sample, offset_error_mm);
+  magnetic_follow_update_yaw_target(controller, offset_error_mm);
+  magnetic_follow_update_adaptive_speed_phase(controller,
+                                               offset_error_mm);
+  magnetic_follow_update_speed_limit(controller,
+                                     offset_error_mm,
+                                     requested_run_rpm);
 }
 
 float magnetic_follow_controller_wheel_correction_rpm(

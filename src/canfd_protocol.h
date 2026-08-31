@@ -22,6 +22,7 @@ extern "C" {
 #define CANFD_ID_SAFETY_STATUS               0x481U
 #define CANFD_ID_MOTOR_DIAGNOSTIC             0x581U
 #define CANFD_ID_DOCK_STATUS                  0x582U
+#define CANFD_ID_DOCK_SCAN                    0x583U
 
 typedef enum
 {
@@ -71,6 +72,9 @@ typedef struct
   int32_t yaw_cdeg;
   int16_t linear_mm_s;
   int16_t yaw_rate_cdeg_s;
+  int16_t accel_x_mg;
+  int16_t accel_y_mg;
+  int16_t accel_z_mg;
   uint16_t valid_flags;
 } canfd_odom_status_t;
 
@@ -110,7 +114,20 @@ typedef struct
   uint8_t left_range_status;
   uint8_t right_range_status;
   int32_t bus_error;
+  uint16_t left_raw_mm;
+  uint16_t right_raw_mm;
 } canfd_dock_status_t;
+
+typedef struct
+{
+  uint32_t sample_sequence;
+  uint32_t sample_time_ms;
+  uint16_t left_raw_mm;
+  uint16_t right_raw_mm;
+  uint8_t flags;
+  uint8_t left_range_status;
+  uint8_t right_range_status;
+} canfd_dock_scan_t;
 
 typedef struct
 {
@@ -169,6 +186,7 @@ void canfd_protocol_send_drive_status(const canfd_drive_status_t *status);
 void canfd_protocol_send_odom_status(const canfd_odom_status_t *status);
 void canfd_protocol_send_motor_status(const canfd_motor_status_t *status);
 void canfd_protocol_send_dock_status(const canfd_dock_status_t *status);
+void canfd_protocol_send_dock_scan(const canfd_dock_scan_t *status);
 void canfd_protocol_send_safety_status(
     const canfd_safety_status_t *status,
     uint8_t urgent);

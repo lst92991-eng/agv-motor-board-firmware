@@ -24,6 +24,7 @@
 #define DOCK_TOF_MODEL_ID_REGISTER                 0xC0U
 #define DOCK_TOF_EXPECTED_MODEL_ID                 0xEEU
 #define DOCK_TOF_INVALID_DISTANCE_MM               8190U
+#define DOCK_TOF_TIMING_BUDGET_US                 20000UL
 #define DOCK_TOF_FILTER_SAMPLE_COUNT                  3U
 #define DOCK_TOF_FILTER_LOW_PASS_DIVISOR              4L
 #define DOCK_TOF_FILTER_FIXED_POINT_SHIFT              8
@@ -48,6 +49,7 @@ typedef struct
   dock_tof_filter_t left_filter;
   dock_tof_filter_t right_filter;
   dock_tof_calibration_t calibration;
+  dock_tof_snapshot_t last_snapshot;
   uint32_t sample_sequence;
   uint8_t initialized;
 } dock_tof_context_t;
@@ -282,7 +284,12 @@ static VL53L0X_Error dock_tof_initialize_one(VL53L0X_Dev_t *device,
   if(status == VL53L0X_ERROR_NONE)
   {
     status = VL53L0X_SetDeviceMode(device,
-                                   VL53L0X_DEVICEMODE_SINGLE_RANGING);
+        VL53L0X_DEVICEMODE_CONTINUOUS_RANGING);
+  }
+  if(status == VL53L0X_ERROR_NONE)
+  {
+    status = VL53L0X_SetMeasurementTimingBudgetMicroSeconds(
+        device, DOCK_TOF_TIMING_BUDGET_US);
   }
   return status;
 }
@@ -307,6 +314,14 @@ static void dock_tof_initialize_both(void)
   delay_ms(10U);
   dock_tof_context.right_init_status = dock_tof_initialize_one(
       &dock_tof_context.right_device, DOCK_TOF_RIGHT_ADDRESS);
+  if((dock_tof_context.left_init_status == VL53L0X_ERROR_NONE) &&
+     (dock_tof_context.right_init_status == VL53L0X_ERROR_NONE))
+  {
+    dock_tof_context.left_init_status = VL53L0X_StartMeasurement(
+        &dock_tof_context.left_device);
+    dock_tof_context.right_init_status = VL53L0X_StartMeasurement(
+        &dock_tof_context.right_device);
+  }
 }
 
 uint8_t dock_tof_sensor_init(const dock_tof_calibration_t *calibration)
@@ -362,12 +377,33 @@ uint8_t dock_tof_sensor_sample(dock_tof_snapshot_t *snapshot)
   VL53L0X_RangingMeasurementData_t right_data;
   VL53L0X_Error left_status;
   VL53L0X_Error right_status;
+  VL53L0X_Error clear_status;
   dock_tof_snapshot_t next;
   int32_t left_residual_mm;
   int32_t right_residual_mm;
+  uint8_t left_ready = 0U;
+  uint8_t right_ready = 0U;
 
   if(snapshot == NULL)
   {
+    return 0U;
+  }
+
+  if(dock_tof_sensor_is_ready() == 0U)
+  {
+    *snapshot = dock_tof_context.last_snapshot;
+    return 0U;
+  }
+
+  left_status = VL53L0X_GetMeasurementDataReady(
+      &dock_tof_context.left_device, &left_ready);
+  right_status = VL53L0X_GetMeasurementDataReady(
+      &dock_tof_context.right_device, &right_ready);
+  if((left_status != VL53L0X_ERROR_NONE) ||
+     (right_status != VL53L0X_ERROR_NONE) ||
+     (left_ready == 0U) || (right_ready == 0U))
+  {
+    *snapshot = dock_tof_context.last_snapshot;
     return 0U;
   }
 
@@ -378,21 +414,24 @@ uint8_t dock_tof_sensor_sample(dock_tof_snapshot_t *snapshot)
     dock_tof_context.sample_sequence = 1UL;
   }
   next.sample_sequence = dock_tof_context.sample_sequence;
-  next.left_api_status = (int8_t)dock_tof_context.left_init_status;
-  next.right_api_status = (int8_t)dock_tof_context.right_init_status;
-
-  if(dock_tof_sensor_is_ready() == 0U)
-  {
-    *snapshot = next;
-    return 0U;
-  }
-
   memset(&left_data, 0, sizeof(left_data));
   memset(&right_data, 0, sizeof(right_data));
-  left_status = VL53L0X_PerformSingleRangingMeasurement(
+  left_status = VL53L0X_GetRangingMeasurementData(
       &dock_tof_context.left_device, &left_data);
-  right_status = VL53L0X_PerformSingleRangingMeasurement(
+  clear_status = VL53L0X_ClearInterruptMask(
+      &dock_tof_context.left_device, 0U);
+  if(left_status == VL53L0X_ERROR_NONE)
+  {
+    left_status = clear_status;
+  }
+  right_status = VL53L0X_GetRangingMeasurementData(
       &dock_tof_context.right_device, &right_data);
+  clear_status = VL53L0X_ClearInterruptMask(
+      &dock_tof_context.right_device, 0U);
+  if(right_status == VL53L0X_ERROR_NONE)
+  {
+    right_status = clear_status;
+  }
 
   next.left_api_status = (int8_t)left_status;
   next.right_api_status = (int8_t)right_status;
@@ -403,29 +442,22 @@ uint8_t dock_tof_sensor_sample(dock_tof_snapshot_t *snapshot)
   next.left_valid = dock_tof_measurement_is_valid(&left_data, left_status);
   next.right_valid = dock_tof_measurement_is_valid(&right_data, right_status);
 
+  next.pair_valid = ((next.left_valid != 0U) &&
+                      (next.right_valid != 0U)) ? 1U : 0U;
+  next.left_filtered_mm = dock_tof_filter_last(
+      &dock_tof_context.left_filter);
+  next.right_filtered_mm = dock_tof_filter_last(
+      &dock_tof_context.right_filter);
   if(next.left_valid != 0U)
   {
     next.left_filtered_mm = dock_tof_filter_update(
         &dock_tof_context.left_filter, next.left_raw_mm);
-  }
-  else
-  {
-    next.left_filtered_mm = dock_tof_filter_last(
-        &dock_tof_context.left_filter);
   }
   if(next.right_valid != 0U)
   {
     next.right_filtered_mm = dock_tof_filter_update(
         &dock_tof_context.right_filter, next.right_raw_mm);
   }
-  else
-  {
-    next.right_filtered_mm = dock_tof_filter_last(
-        &dock_tof_context.right_filter);
-  }
-
-  next.pair_valid = ((next.left_valid != 0U) &&
-                     (next.right_valid != 0U)) ? 1U : 0U;
   if(next.pair_valid != 0U)
   {
     left_residual_mm = (int32_t)next.left_filtered_mm -
@@ -442,6 +474,7 @@ uint8_t dock_tof_sensor_sample(dock_tof_snapshot_t *snapshot)
       (gpio_input_data_bit_read(GPIOH, GPIO_PINS_3) != RESET) ? 1U : 0U;
   next.right_gpio_level =
       (gpio_input_data_bit_read(GPIOA, GPIO_PINS_12) != RESET) ? 1U : 0U;
+  dock_tof_context.last_snapshot = next;
   *snapshot = next;
   return next.pair_valid;
 }

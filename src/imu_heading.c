@@ -52,6 +52,13 @@ static float imu_heading_gyro_z_zero_dps;
 static float imu_heading_vertical_x;
 static float imu_heading_vertical_y;
 static float imu_heading_vertical_z;
+static float imu_heading_gravity_x_raw;
+static float imu_heading_gravity_y_raw;
+static float imu_heading_gravity_z_raw;
+static float imu_heading_accel_raw_per_g;
+static int16_t imu_heading_linear_accel_x_mg;
+static int16_t imu_heading_linear_accel_y_mg;
+static int16_t imu_heading_linear_accel_z_mg;
 static float imu_heading_yaw_deg;
 static float imu_heading_rate_dps;
 static float imu_heading_raw_rate_dps;
@@ -374,6 +381,16 @@ static float imu_heading_raw_to_dps(int16_t raw_value)
   return ((float)raw_value * (float)IMU_HEADING_GYRO_RANGE_DPS) / (float)half_scale;
 }
 
+static int16_t imu_heading_linear_accel_to_mg(int16_t raw_value,
+                                              float gravity_raw)
+{
+  float value_mg = (((float)raw_value - gravity_raw) * 1000.0f) /
+                   imu_heading_accel_raw_per_g;
+
+  value_mg = imu_heading_limit(value_mg, -2000.0f, 2000.0f);
+  return (int16_t)value_mg;
+}
+
 /* 上电静止采样：估计三轴零偏，并由重力方向确定车辆竖直轴。 */
 static int8_t imu_heading_calibrate(void)
 {
@@ -442,14 +459,18 @@ static int8_t imu_heading_calibrate(void)
   imu_heading_gyro_x_zero_dps = gyro_x_sum / (float)valid_count;
   imu_heading_gyro_y_zero_dps = gyro_y_sum / (float)valid_count;
   imu_heading_gyro_z_zero_dps = gyro_z_sum / (float)valid_count;
-  imu_heading_vertical_x = accel_x_sum / (float)valid_count;
-  imu_heading_vertical_y = accel_y_sum / (float)valid_count;
-  imu_heading_vertical_z = accel_z_sum / (float)valid_count;
+  imu_heading_gravity_x_raw = accel_x_sum / (float)valid_count;
+  imu_heading_gravity_y_raw = accel_y_sum / (float)valid_count;
+  imu_heading_gravity_z_raw = accel_z_sum / (float)valid_count;
+  imu_heading_vertical_x = imu_heading_gravity_x_raw;
+  imu_heading_vertical_y = imu_heading_gravity_y_raw;
+  imu_heading_vertical_z = imu_heading_gravity_z_raw;
   accel_norm = sqrtf((imu_heading_vertical_x * imu_heading_vertical_x) +
                      (imu_heading_vertical_y * imu_heading_vertical_y) +
                      (imu_heading_vertical_z * imu_heading_vertical_z));
   expected_one_g = ((float)(1UL << (imu_heading_dev.resolution - 1U))) /
                    IMU_HEADING_ACCEL_RANGE_G;
+  imu_heading_accel_raw_per_g = expected_one_g;
   gravity_ratio = accel_norm / expected_one_g;
   if((gravity_ratio < IMU_HEADING_MIN_GRAVITY_RATIO) ||
      (gravity_ratio > IMU_HEADING_MAX_GRAVITY_RATIO))
@@ -501,6 +522,9 @@ static int8_t imu_heading_calibrate(void)
   imu_heading_rate_dps = 0.0f;
   imu_heading_raw_rate_dps = 0.0f;
   imu_heading_filtered_rate_dps = 0.0f;
+  imu_heading_linear_accel_x_mg = 0;
+  imu_heading_linear_accel_y_mg = 0;
+  imu_heading_linear_accel_z_mg = 0;
   printf("heading gyro_zero=%.3f,%.3f,%.3f axis=%.3f,%.3f,%.3f "
          "sigma=%.3f deadband=%.3f dps samples=%u\r\n",
          imu_heading_gyro_x_zero_dps,
@@ -627,6 +651,16 @@ int8_t imu_heading_update(float dt_s)
     }
   }
 
+  if((sensor_data.status & BMI2_DRDY_ACC) != 0U)
+  {
+    imu_heading_linear_accel_x_mg = imu_heading_linear_accel_to_mg(
+        sensor_data.acc.x, imu_heading_gravity_x_raw);
+    imu_heading_linear_accel_y_mg = imu_heading_linear_accel_to_mg(
+        sensor_data.acc.y, imu_heading_gravity_y_raw);
+    imu_heading_linear_accel_z_mg = imu_heading_linear_accel_to_mg(
+        sensor_data.acc.z, imu_heading_gravity_z_raw);
+  }
+
   return BMI2_OK;
 }
 
@@ -658,6 +692,21 @@ float imu_heading_get_filtered_rate_dps(void)
 float imu_heading_get_deadband_dps(void)
 {
   return imu_heading_deadband_dps;
+}
+
+int16_t imu_heading_get_linear_accel_x_mg(void)
+{
+  return imu_heading_linear_accel_x_mg;
+}
+
+int16_t imu_heading_get_linear_accel_y_mg(void)
+{
+  return imu_heading_linear_accel_y_mg;
+}
+
+int16_t imu_heading_get_linear_accel_z_mg(void)
+{
+  return imu_heading_linear_accel_z_mg;
 }
 
 int8_t imu_heading_get_status(void)

@@ -45,18 +45,22 @@
 #define CHASSIS_CONTROL_ENCODER_MISMATCH_COUNTS         1200L
 #define CHASSIS_CONTROL_ENCODER_CHECK_MIN_COUNTS        1500L
 
-#define CHASSIS_CONTROL_MIN_DISTANCE_MM                   50L
+#define CHASSIS_CONTROL_MIN_DISTANCE_MM                   10L
 #define CHASSIS_CONTROL_MAX_DISTANCE_MM                 3000L
 #define CHASSIS_CONTROL_MAX_MAG_DISTANCE_MM             6000L
 #define CHASSIS_CONTROL_MIN_SPEED_MM_S                    50U
-#define CHASSIS_CONTROL_MAX_SPEED_MM_S                   100U
+#define CHASSIS_CONTROL_MAX_SPEED_MM_S                   150U
 #define CHASSIS_CONTROL_MAX_ROTATION_SPEED_MM_S          300U
 #define CHASSIS_CONTROL_MAX_MAG_SPEED_MM_S               330U
-#define CHASSIS_CONTROL_MIN_ROTATION_CDEG               1000L
+#define CHASSIS_CONTROL_MIN_ROTATION_CDEG                100L
 #define CHASSIS_CONTROL_MAX_ROTATION_CDEG              18000L
+#define CHASSIS_CONTROL_PRECISION_TRANSLATION_MAX_MM      49L
+#define CHASSIS_CONTROL_PRECISION_ROTATION_MAX_CDEG      999L
 #define CHASSIS_CONTROL_ROTATE_DECEL_COUNTS              400L
 #define CHASSIS_CONTROL_ROTATE_MIN_FEEDBACK_RPM            3.0f
 #define CHASSIS_CONTROL_ROTATE_CONFIRM_TICKS              20U
+#define CHASSIS_CONTROL_PRECISION_ROTATE_CONFIRM_TICKS      4U
+#define CHASSIS_CONTROL_PRECISION_ROTATE_TIMEOUT_TICKS    100U
 /* 万向轮换向会延迟一侧车轮起转；延长准入窗口但不放宽双轮方向证据。 */
 #define CHASSIS_CONTROL_ROTATE_CONFIRM_TIMEOUT_TICKS     400U
 
@@ -213,6 +217,26 @@ static int32_t chassis_abs_count(int32_t value)
 static float chassis_abs_float(float value)
 {
   return (value < 0.0f) ? -value : value;
+}
+
+static uint8_t chassis_is_precision_rotation(void)
+{
+  return ((chassis_rotation_task != 0U) &&
+          (chassis_abs_count(chassis_target_yaw_cdeg) <=
+           CHASSIS_CONTROL_PRECISION_ROTATION_MAX_CDEG)) ? 1U : 0U;
+}
+
+static int32_t chassis_get_rotation_deceleration_counts(void)
+{
+  int32_t target_cdeg = chassis_abs_count(chassis_target_yaw_cdeg);
+
+  if((chassis_is_precision_rotation() != 0U) && (target_cdeg > 0L))
+  {
+    return (CHASSIS_CONTROL_ROTATE_DECEL_COUNTS *
+            (CHASSIS_CONTROL_PRECISION_ROTATION_MAX_CDEG + 1L) +
+            target_cdeg - 1L) / target_cdeg;
+  }
+  return CHASSIS_CONTROL_ROTATE_DECEL_COUNTS;
 }
 
 static float chassis_limit(float value, float value_min, float value_max)
@@ -1022,13 +1046,15 @@ static void chassis_update_deceleration(void)
   {
     int32_t remaining_counts = chassis_total_counts -
                                chassis_center_progress;
+    int32_t deceleration_counts =
+        chassis_get_rotation_deceleration_counts();
 
     if(remaining_counts < 0L)
     {
       remaining_counts = 0L;
     }
     remaining_ratio = (float)remaining_counts /
-                      (float)CHASSIS_CONTROL_ROTATE_DECEL_COUNTS;
+                      (float)deceleration_counts;
     remaining_ratio = chassis_limit(remaining_ratio, 0.0f, 1.0f);
     chassis_base_rpm = decel_end_rpm +
         ((chassis_requested_run_rpm - decel_end_rpm) * remaining_ratio);
@@ -1067,6 +1093,8 @@ static void chassis_update_state(void)
   float left_rpm;
   float right_rpm;
   uint8_t rotation_feedback_valid;
+  uint16_t rotation_confirm_ticks_required;
+  uint16_t rotation_confirm_timeout_ticks;
 
   if(chassis_is_driving() == 0U)
   {
@@ -1091,6 +1119,14 @@ static void chassis_update_state(void)
 
   if(chassis_rotation_task != 0U)
   {
+    rotation_confirm_ticks_required =
+        (chassis_is_precision_rotation() != 0U) ?
+        CHASSIS_CONTROL_PRECISION_ROTATE_CONFIRM_TICKS :
+        CHASSIS_CONTROL_ROTATE_CONFIRM_TICKS;
+    rotation_confirm_timeout_ticks =
+        (chassis_is_precision_rotation() != 0U) ?
+        CHASSIS_CONTROL_PRECISION_ROTATE_TIMEOUT_TICKS :
+        CHASSIS_CONTROL_ROTATE_CONFIRM_TIMEOUT_TICKS;
     left_rpm = chassis_get_left_measured_rpm();
     right_rpm = chassis_get_right_measured_rpm();
     rotation_feedback_valid =
@@ -1101,8 +1137,7 @@ static void chassis_update_state(void)
           (right_rpm <= -CHASSIS_CONTROL_ROTATE_MIN_FEEDBACK_RPM)) ? 1U : 0U);
     if(rotation_feedback_valid != 0U)
     {
-      if(chassis_rotation_confirm_ticks <
-         CHASSIS_CONTROL_ROTATE_CONFIRM_TICKS)
+      if(chassis_rotation_confirm_ticks < rotation_confirm_ticks_required)
       {
         chassis_rotation_confirm_ticks++;
       }
@@ -1111,17 +1146,24 @@ static void chassis_update_state(void)
     {
       chassis_rotation_confirm_ticks = 0U;
     }
-    if(chassis_rotation_confirm_ticks >=
-       CHASSIS_CONTROL_ROTATE_CONFIRM_TICKS)
+    if(chassis_rotation_confirm_ticks >= rotation_confirm_ticks_required)
     {
       if(chassis_rotation_confirmed == 0U)
       {
         chassis_rotation_confirmed = 1U;
       }
     }
+    if((chassis_abs_count(chassis_target_yaw_cdeg) ==
+        CHASSIS_CONTROL_MIN_ROTATION_CDEG) &&
+       (chassis_abs_float(
+            chassis_heading_fusion.fused_yaw_unwrapped_deg) >=
+        ((float)CHASSIS_CONTROL_MIN_ROTATION_CDEG / 100.0f)))
+    {
+      chassis_complete_task();
+      return;
+    }
     if((chassis_rotation_confirmed == 0U) &&
-       (chassis_task_ticks >=
-        CHASSIS_CONTROL_ROTATE_CONFIRM_TIMEOUT_TICKS))
+       (chassis_task_ticks >= rotation_confirm_timeout_ticks))
     {
       chassis_fail_motion("ROTATION_NOT_MOVING");
       return;
@@ -1225,7 +1267,8 @@ static void chassis_update_state(void)
     uint8_t rotation_decelerates =
         ((chassis_rotation_task != 0U) &&
          (chassis_center_progress >=
-          (chassis_total_counts - CHASSIS_CONTROL_ROTATE_DECEL_COUNTS))) ?
+          (chassis_total_counts -
+           chassis_get_rotation_deceleration_counts()))) ?
         1U : 0U;
 
     if((rotation_decelerates != 0U) ||
@@ -1407,6 +1450,12 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
         CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM,
         8.0f,
         CHASSIS_CONTROL_MAX_RUN_RPM);
+    if(chassis_is_precision_rotation() != 0U)
+    {
+      chassis_requested_run_rpm =
+          ((float)CHASSIS_CONTROL_MIN_SPEED_MM_S * 60.0f) /
+          CHASSIS_CONTROL_WHEEL_CIRCUMFERENCE_MM;
+    }
     if(follow_data != NULL)
     {
       chassis_convert_magnetic_sample(&magnetic_sample,
@@ -1463,7 +1512,11 @@ motion_command_handle_result_t chassis_motion_controller_handle_command(
     }
     else
     {
-      chassis_enter_state(CHASSIS_STATE_CASTER_ALIGN);
+      /* 10~49mm精细步进无法消耗固定100mm万向轮阶段，直接低速减速闭环。 */
+      chassis_enter_state(
+          (chassis_abs_count(chassis_target_distance_mm) <=
+           CHASSIS_CONTROL_PRECISION_TRANSLATION_MAX_MM) ?
+          CHASSIS_STATE_DECELERATE : CHASSIS_STATE_CASTER_ALIGN);
       if(chassis_magnetic_follow_task != 0U)
       {
         debug_uart_log_printf(
@@ -1825,7 +1878,10 @@ static void chassis_send_odom_can(void)
   status.linear_mm_s = chassis_to_i16(chassis_round_to_int(linear_mm_s));
   status.yaw_rate_cdeg_s = chassis_to_i16(chassis_round_to_int(
       imu_heading_get_rate_dps() * 100.0f));
-  status.valid_flags = (imu_heading_get_status() == BMI2_OK) ? 0x0007U :
+  status.accel_x_mg = imu_heading_get_linear_accel_x_mg();
+  status.accel_y_mg = imu_heading_get_linear_accel_y_mg();
+  status.accel_z_mg = imu_heading_get_linear_accel_z_mg();
+  status.valid_flags = (imu_heading_get_status() == BMI2_OK) ? 0x000FU :
                                                                0x0003U;
   canfd_protocol_send_odom_status(&status);
 }
@@ -1953,8 +2009,8 @@ void chassis_motion_controller_init(void)
     chassis_reset_heading_estimator();
     chassis_heading_target_deg = 0.0f;
     debug_uart_log_printf(
-        "CHASSIS_CONTROL,READY,TRANSLATE_50_3000MM,"
-        "ROTATE_10_90DEG,50_100MM_S\r\n");
+        "CHASSIS_CONTROL,READY,TRANSLATE_10_3000MM_50_150MM_S,"
+        "ROTATE_1_180DEG_50_300MM_S\r\n");
   }
   else
   {
@@ -2040,4 +2096,9 @@ uint8_t chassis_motion_controller_get_state(void)
 uint16_t chassis_motion_controller_get_fault_mask(void)
 {
   return chassis_fault;
+}
+
+uint32_t chassis_motion_controller_get_uptime_ms(void)
+{
+  return chassis_uptime_ms;
 }
