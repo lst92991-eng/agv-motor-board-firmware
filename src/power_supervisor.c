@@ -17,9 +17,9 @@
 static const power_supervisor_config_t power_default =
 {
   POWER_CURRENT_GAIN, POWER_CURRENT_GAIN, 0U, 0U, POWER_ZERO_MAX,
-  POWER_BUS_GAIN, 0L, 5500UL, 5800UL,
-  33000UL - POWER_BUS_CODE_MV, 33000UL,
-  3000UL, 20U, 20U, 3U, 0U
+  POWER_BUS_GAIN, 0L, 18000UL, 19200UL,
+  25200UL, 25800UL,
+  800UL, 100U, 20U, 3U, 1U
 };
 
 static power_supervisor_config_t power_config;

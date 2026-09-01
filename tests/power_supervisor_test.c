@@ -90,14 +90,17 @@ static void test_invalid_and_unapproved_config(void)
               "unapproved limits block ready");
 
   provisional = power_supervisor_provisional_config();
-  expect_true((provisional->limits_approved == 0U) &&
+  expect_true((provisional->limits_approved == 1U) &&
               (provisional->left_current_ua_per_count == 806UL) &&
               (provisional->zero_max_raw == 19U) &&
               (provisional->bus_uv_per_count == 8864UL) &&
-              (provisional->undervoltage_trip_mv == 5500UL) &&
-              (provisional->overvoltage_trip_mv == 33000UL) &&
-              (provisional->peak_current_ma == 3000UL),
-              "production ceilings stay formula-derived and provisional");
+              (provisional->undervoltage_trip_mv == 18000UL) &&
+              (provisional->undervoltage_recover_mv == 19200UL) &&
+              (provisional->overvoltage_recover_mv == 25200UL) &&
+              (provisional->overvoltage_trip_mv == 25800UL) &&
+              (provisional->peak_current_ma == 800UL) &&
+              (provisional->peak_duration_ms == 100U),
+              "production development limits match motor and BMS evidence");
   power_supervisor_init(provisional);
   power_supervisor_step(1U, 1000U, 1000U, 1000U, 0U);
   power_supervisor_get_snapshot(&snapshot);

@@ -60,8 +60,8 @@ Linux/RK3576 Supervisor负责非实时决策，只能通过正式CAN FD运动接
 - `canfd_status_codec.*`负责可主机测试的状态PDO字节布局。
 
 TOF和IR已经从本板生产固件移除，后续归属独立对桩传感节点。电机板只保留
-`power_supervisor.*`和`adc_monitor.*`；未经现场标定时`limits_approved=0`，
-禁止ENABLE。
+`power_supervisor.*`和`adc_monitor.*`；生产Target按用户要求启用开发动态验收配置，
+只有静止零点、18.0～25.8V母线和0.8A/100ms电流门均通过才允许ENABLE。
 
 PN532/RFID当前不在生产树；以后只能产生带时间戳/序号的事件交给Supervisor，禁止
 直接ENABLE、STOP、设轮速或PWM。充电对准、TOF闭环和电流环仍需单独实车验收。

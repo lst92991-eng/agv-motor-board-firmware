@@ -1,7 +1,8 @@
 # 电机板电气监督首次标定与测试
 
-> 当前固件保持 `limits_approved=0`。本流程第一阶段只采数据，不能启动车轮；
-> 不得把 `NOT_APPROVED` 手工改成通过来跳过测量。
+> 当前生产Target按用户要求启用开发动态验收配置：6串母线18.0V跳闸/19.2V恢复、
+> 25.2V恢复/25.8V跳闸，单电机0.8A持续100ms跳闸。它允许受监控的动态开发验收，
+> 但不替代最终产品的电流、电压和热证据。
 
 ## 1. 准备
 
@@ -21,8 +22,8 @@ power_data = bus_mv,left_current_ma,right_current_ma,left_zero_raw,right_zero_ra
 ```
 
 `adc_raw[0]`对应PA3母线，`adc_raw[1]`对应PA4左电流，`adc_raw[2]`对应PA5右电流。
-若当前SWD工具不能导出连续记录，本阶段视为未完成；不得用手工修改
-`limits_approved`代替标定证据。
+若当前SWD工具不能导出连续记录，动态开发仍可依靠现有本地保护继续，但不得把本轮
+结果表述为最终电气标定完成。
 
 通过条件：
 
@@ -30,8 +31,7 @@ power_data = bus_mv,left_current_ma,right_current_ma,left_zero_raw,right_zero_ra
 - 只使用连续更新且没有`POWER_FAULT_ADC`的记录；ADC超时周期不可用于拟合；
 - 左右零点均不超过19 ADC码，静止后`current_ma`接近0；
 - 万用表母线电压与`bus_mv`方向一致，记录两者用于拟合增益/偏置；
-- `fault_mask=0x02`且`ready=0`是当前预期，表示阈值尚未批准；CAN `0x481`
-  的`warning_mask`也应为`0x00000002`；
+- 静止零点完成后`fault_mask=0`且`ready=1`；CAN `0x481`的`warning_mask`应为0；
 - 不得出现ADC、欠压、过压或峰值电流故障位。
 
 若零点窗口无法完成、原始值抖动明显或母线换算错误，停止后续测试，先查模拟地、
