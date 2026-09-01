@@ -7,7 +7,9 @@ typedef struct
 {
   float kp;
   float ki;
+  float kd;
   float integral;
+  float previous_error;
   float requested_rpm;
   float target_rpm;
   float measured_rpm;
@@ -17,6 +19,7 @@ typedef struct
   uint8_t stall_cycles;
   uint8_t fault;
   uint8_t zero_cycles;
+  uint8_t derivative_valid;
   int8_t last_sign;
 } motor_speed_axis_t;
 
@@ -46,8 +49,10 @@ static float motor_feed_forward(float rpm)
 static void motor_axis_reset(motor_speed_axis_t *axis)
 {
   axis->integral = 0.0f;
+  axis->previous_error = 0.0f;
   axis->pwm = 0;
   axis->stall_cycles = 0U;
+  axis->derivative_valid = 0U;
 }
 
 static void motor_axis_measure(motor_speed_axis_t *axis, motor_id_t motor)
@@ -98,6 +103,7 @@ static int16_t motor_axis_command(motor_speed_axis_t *axis)
   float forward;
   float error;
   float candidate_integral;
+  float derivative = 0.0f;
   float correction;
   float output;
 
@@ -124,15 +130,22 @@ static int16_t motor_axis_command(motor_speed_axis_t *axis)
     axis->stall_cycles = 0U;
   }
   error = axis->target_rpm - axis->measured_rpm;
+  if(axis->derivative_valid != 0U)
+    derivative = (error - axis->previous_error) * 1000.0f /
+        MOTOR_SPEED_CONTROL_PERIOD_MS;
+  axis->previous_error = error;
+  axis->derivative_valid = 1U;
   candidate_integral = axis->integral +
       error * MOTOR_SPEED_CONTROL_PERIOD_MS / 1000.0f;
   candidate_integral = motor_limit(candidate_integral,
       MOTOR_SPEED_PID_CORRECTION_LIMIT / axis->ki);
-  correction = axis->kp * error + axis->ki * candidate_integral;
+  correction = axis->kp * error + axis->ki * candidate_integral +
+      axis->kd * derivative;
   if(!(((correction > MOTOR_SPEED_PID_CORRECTION_LIMIT) && (error > 0.0f)) ||
        ((correction < -MOTOR_SPEED_PID_CORRECTION_LIMIT) && (error < 0.0f))))
     axis->integral = candidate_integral;
-  correction = motor_limit(axis->kp * error + axis->ki * axis->integral,
+  correction = motor_limit(axis->kp * error + axis->ki * axis->integral +
+                           axis->kd * derivative,
                            MOTOR_SPEED_PID_CORRECTION_LIMIT);
   output = motor_feed_forward(axis->target_rpm) + correction;
   if(axis->target_rpm > 0.0f)
@@ -163,6 +176,8 @@ void motor_speed_control_init(void)
         MOTOR_SPEED_LEFT_PID_KP : MOTOR_SPEED_RIGHT_PID_KP;
     axis->ki = (index == MOTOR_LEFT) ?
         MOTOR_SPEED_LEFT_PID_KI : MOTOR_SPEED_RIGHT_PID_KI;
+    axis->kd = (index == MOTOR_LEFT) ?
+        MOTOR_SPEED_LEFT_PID_KD : MOTOR_SPEED_RIGHT_PID_KD;
     axis->requested_rpm = axis->target_rpm = 0.0f;
     axis->measured_rpm = axis->filtered_rpm = 0.0f;
     axis->last_count = motor_encoder_get_count((motor_id_t)index);

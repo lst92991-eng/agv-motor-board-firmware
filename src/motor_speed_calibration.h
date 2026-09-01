@@ -14,7 +14,7 @@
 #define MOTOR_SPEED_TARGET_LIMIT_RPM                  75.0f
 #define MOTOR_SPEED_RAW_RPM_LIMIT                    120.0f
 
-/* 前馈保留实车低速克服静摩擦所需的偏置，PI只补偿负载和个体差异。 */
+/* 前馈克服低速静摩擦；PID补偿负载和个体差异，D当前保持0等待实车曲线。 */
 #define MOTOR_SPEED_FEED_FORWARD_PER_RPM               9.4f
 #define MOTOR_SPEED_FEED_FORWARD_STATIC_PWM          100.0f
 /* 20ms、2640 count/rev时单个计数约为1.14RPM。 */
@@ -22,8 +22,10 @@
 
 #define MOTOR_SPEED_LEFT_PID_KP                        4.0f
 #define MOTOR_SPEED_LEFT_PID_KI                        8.0f
+#define MOTOR_SPEED_LEFT_PID_KD                        0.0f
 #define MOTOR_SPEED_RIGHT_PID_KP                       4.0f
 #define MOTOR_SPEED_RIGHT_PID_KI                       8.0f
+#define MOTOR_SPEED_RIGHT_PID_KD                       0.0f
 #define MOTOR_SPEED_PID_CORRECTION_LIMIT             250.0f
 
 /* 目标存在但200ms无反馈时只锁存停车，不执行PWM脱困。 */

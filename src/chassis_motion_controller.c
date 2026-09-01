@@ -52,7 +52,7 @@ typedef enum
 
 static const motion_reference_platform_limits_t chassis_limits =
 {
-  330U, 1336U, 10U, 500U, 10U, 1000U,
+  300U, 1200U, 10U, 500U, 10U, 1000U,
   CHASSIS_DRIVE_TRACK_MM,
   CHASSIS_WHEEL_CIRCUMFERENCE_MM,
   MOTOR_SPEED_TARGET_LIMIT_RPM,
