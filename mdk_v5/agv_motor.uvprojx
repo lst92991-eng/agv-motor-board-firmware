@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>AT32F456RCT7,USE_STDPERIPH_DRIVER,AT_START_F456_V1,USE_FREERTOS,USE_I2C_2V8</Define>
               <Undefine></Undefine>
-              <IncludePath>..\src;..\..\agv-motion-contract\include;..\libraries\drivers\inc;..\libraries\cmsis\cm4\core_support;..\libraries\cmsis\cm4\device_support;..\inc;..\at32f45x_board;..\third_party\bosch_bmi270;..\third_party\freertos\include;..\third_party\freertos\portable\rvds\ARM_CM4F</IncludePath>
+              <IncludePath>..\src\app;..\src\services;..\src\drivers;..\src\config;..\..\agv-motion-contract\include;..\libraries\drivers\inc;..\libraries\cmsis\cm4\core_support;..\libraries\cmsis\cm4\device_support;..\inc;..\at32f45x_board;..\third_party\bosch_bmi270;..\third_party\freertos\include;..\third_party\freertos\portable\rvds\ARM_CM4F</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -381,103 +381,44 @@
       </TargetOption>
       <Groups>
         <Group>
-          <GroupName>production</GroupName>
+          <GroupName>app</GroupName>
           <Files>
-            <File>
-              <FileName>at32f45x_clock.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\at32f45x_clock.c</FilePath>
-            </File>
-            <File>
-              <FileName>at32f45x_int.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\at32f45x_int.c</FilePath>
-            </File>
-            <File>
-              <FileName>main.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\main.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_freertos.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\app_freertos.c</FilePath>
-            </File>
-            <File>
-              <FileName>system_watchdog.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\system_watchdog.c</FilePath>
-            </File>
-            <File>
-              <FileName>motion_reference_receiver.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motion_reference_receiver.c</FilePath>
-            </File>
-            <File>
-              <FileName>motion_reference_control.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motion_reference_control.c</FilePath>
-            </File>
-            <File>
-              <FileName>chassis_motion_controller.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\chassis_motion_controller.c</FilePath>
-            </File>
-            <File>
-              <FileName>chassis_heading_fusion.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\chassis_heading_fusion.c</FilePath>
-            </File>
-            <File>
-              <FileName>imu_heading.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\imu_heading.c</FilePath>
-            </File>
-            <File>
-              <FileName>motor_driver.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motor_driver.c</FilePath>
-            </File>
-            <File>
-              <FileName>motor_speed_control.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motor_speed_control.c</FilePath>
-            </File>
-            <File>
-              <FileName>adc_monitor.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\adc_monitor.c</FilePath>
-            </File>
-            <File>
-              <FileName>motor_encoder.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\motor_encoder.c</FilePath>
-            </File>
-            <File>
-              <FileName>canfd_protocol.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\canfd_protocol.c</FilePath>
-            </File>
-            <File>
-              <FileName>canfd_status_codec.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\canfd_status_codec.c</FilePath>
-            </File>
-            <File>
-              <FileName>power_supervisor.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\power_supervisor.c</FilePath>
-            </File>
-            <File>
-              <FileName>bumper_input.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\bumper_input.c</FilePath>
-            </File>
-            <File>
-              <FileName>bumper_safety.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\src\bumper_safety.c</FilePath>
-            </File>
+            <File><FileName>main.c</FileName><FileType>1</FileType><FilePath>..\src\app\main.c</FilePath></File>
+            <File><FileName>app_freertos.c</FileName><FileType>1</FileType><FilePath>..\src\app\app_freertos.c</FilePath></File>
+            <File><FileName>chassis_motion_controller.c</FileName><FileType>1</FileType><FilePath>..\src\app\chassis_motion_controller.c</FilePath></File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>services</GroupName>
+          <Files>
+            <File><FileName>bumper_safety.c</FileName><FileType>1</FileType><FilePath>..\src\services\bumper_safety.c</FilePath></File>
+            <File><FileName>canfd_protocol.c</FileName><FileType>1</FileType><FilePath>..\src\services\canfd_protocol.c</FilePath></File>
+            <File><FileName>canfd_status_codec.c</FileName><FileType>1</FileType><FilePath>..\src\services\canfd_status_codec.c</FilePath></File>
+            <File><FileName>chassis_heading_fusion.c</FileName><FileType>1</FileType><FilePath>..\src\services\chassis_heading_fusion.c</FilePath></File>
+            <File><FileName>motion_reference_receiver.c</FileName><FileType>1</FileType><FilePath>..\src\services\motion_reference_receiver.c</FilePath></File>
+            <File><FileName>motion_reference_control.c</FileName><FileType>1</FileType><FilePath>..\src\services\motion_reference_control.c</FilePath></File>
+            <File><FileName>motor_speed_control.c</FileName><FileType>1</FileType><FilePath>..\src\services\motor_speed_control.c</FilePath></File>
+            <File><FileName>power_supervisor.c</FileName><FileType>1</FileType><FilePath>..\src\services\power_supervisor.c</FilePath></File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>drivers</GroupName>
+          <Files>
+            <File><FileName>at32f45x_clock.c</FileName><FileType>1</FileType><FilePath>..\src\drivers\at32f45x_clock.c</FilePath></File>
+            <File><FileName>at32f45x_int.c</FileName><FileType>1</FileType><FilePath>..\src\drivers\at32f45x_int.c</FilePath></File>
+            <File><FileName>adc_monitor.c</FileName><FileType>1</FileType><FilePath>..\src\drivers\adc_monitor.c</FilePath></File>
+            <File><FileName>bumper_input.c</FileName><FileType>1</FileType><FilePath>..\src\drivers\bumper_input.c</FilePath></File>
+            <File><FileName>imu_heading.c</FileName><FileType>1</FileType><FilePath>..\src\drivers\imu_heading.c</FilePath></File>
+            <File><FileName>motor_driver.c</FileName><FileType>1</FileType><FilePath>..\src\drivers\motor_driver.c</FilePath></File>
+            <File><FileName>motor_encoder.c</FileName><FileType>1</FileType><FilePath>..\src\drivers\motor_encoder.c</FilePath></File>
+            <File><FileName>system_watchdog.c</FileName><FileType>1</FileType><FilePath>..\src\drivers\system_watchdog.c</FilePath></File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>config</GroupName>
+          <Files>
+            <File><FileName>motor_speed_calibration.h</FileName><FileType>5</FileType><FilePath>..\src\config\motor_speed_calibration.h</FilePath></File>
+            <File><FileName>math_constants.h</FileName><FileType>5</FileType><FilePath>..\src\config\math_constants.h</FilePath></File>
           </Files>
         </Group>
         <Group>

@@ -8,7 +8,7 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
 
 ## 正式入口
 
-`src/main.c`只有一个生产入口，不再通过`app_mode.h`切换独立测试程序。主要任务：
+`src/app/main.c`只有一个生产入口，不再通过`app_mode.h`切换独立测试程序。主要任务：
 
 | 任务 | 周期 | 职责 |
 | --- | ---: | --- |
@@ -16,6 +16,19 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
 | `CANFD` | 2ms | 整车CAN FD协议、控制租约和命令结果 |
 | `PowerMonitor` | 20ms | ADC、电流/母线监督与故障提交 |
 | `Watchdog` | 20ms | Control/CAN/Power均推进时才喂狗 |
+
+## 源码分层
+
+```text
+src/
+  drivers/   GPIO、PWM、编码器、ADC、BMI270、WDT和MCU中断/时钟
+  services/  CAN协议、Reference、差速、PID、融合和安全服务
+  app/       main、FreeRTOS组合根和唯一底盘状态机
+  config/    电机标定与公共数学常量
+```
+
+教学阅读顺序固定为`drivers → services → app`。低层不得调用应用层，业务和路线
+逻辑不得下沉到硬件驱动。
 
 ## 已验收能力
 
@@ -61,6 +74,7 @@ TOF和IR已经移出生产固件，后续属于独立对桩传感节点。电机
 
 ## 关键文档
 
+- [当前分层、依赖图与教学阅读顺序](docs/teaching/current_architecture.md)
 - [能力基线](hardware/motor_board_capability_baseline_2026-08-19.md)
 - [磁条循迹验收](hardware/chassis_magnetic_straight_validation_2026-08-18.md)
 - [四方向验收](hardware/chassis_four_direction_ground_validation_2026-08-18.md)

@@ -13,7 +13,15 @@ if($null -eq $vcvarsPath) {
 }
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$includePath = Join-Path $repoRoot 'src'
+$sourceIncludePaths = @(
+  (Join-Path $repoRoot 'src\app'),
+  (Join-Path $repoRoot 'src\services'),
+  (Join-Path $repoRoot 'src\drivers'),
+  (Join-Path $repoRoot 'src\config')
+)
+$sourceIncludeArguments = ($sourceIncludePaths | ForEach-Object {
+  '/I "{0}"' -f $_
+}) -join ' '
 $testIncludePath = Join-Path $repoRoot 'tests'
 $boardIncludePath = Join-Path $repoRoot 'at32f45x_board'
 $contractIncludePath = (Resolve-Path -LiteralPath `
@@ -35,8 +43,8 @@ function Invoke-CHostTest {
   $moduleArguments = $moduleSources -join ' '
   $testExecutable = Join-Path ([IO.Path]::GetTempPath()) `
     ("agv_{0}.exe" -f $Name)
-  $command = 'call "{0}" >nul && cl /nologo /W4 /WX /utf-8 /TC "{1}" {2} /I "{3}" /I "{4}" /I "{5}" /I "{6}" /Fe:"{7}" && "{7}"' -f `
-    $vcvarsPath, $testSource, $moduleArguments, $includePath, `
+  $command = 'call "{0}" >nul && cl /nologo /W4 /WX /utf-8 /TC "{1}" {2} {3} /I "{4}" /I "{5}" /I "{6}" /Fe:"{7}" && "{7}"' -f `
+    $vcvarsPath, $testSource, $moduleArguments, $sourceIncludeArguments, `
     $contractIncludePath, $testIncludePath, $boardIncludePath, $testExecutable
 
   & $env:ComSpec /d /c $command
@@ -48,16 +56,16 @@ function Invoke-CHostTest {
 Invoke-CHostTest `
   -Name 'chassis_heading_fusion_test' `
   -TestRelativePath 'tests\chassis_heading_fusion_test.c' `
-  -ModuleRelativePath 'src\chassis_heading_fusion.c'
+  -ModuleRelativePath 'src\services\chassis_heading_fusion.c'
 Invoke-CHostTest `
   -Name 'canfd_status_codec_test' `
   -TestRelativePath 'tests\canfd_status_codec_test.c' `
-  -ModuleRelativePath 'src\canfd_status_codec.c'
+  -ModuleRelativePath 'src\services\canfd_status_codec.c'
 Invoke-CHostTest `
   -Name 'motion_reference_test' `
   -TestRelativePath 'tests\motion_reference_test.c' `
-  -ModuleRelativePath 'src\motion_reference_receiver.c', `
-                      'src\motion_reference_control.c'
+  -ModuleRelativePath 'src\services\motion_reference_receiver.c', `
+                      'src\services\motion_reference_control.c'
 Invoke-CHostTest `
   -Name 'system_watchdog_test' `
   -TestRelativePath 'tests\system_watchdog_test.c' `
@@ -65,8 +73,8 @@ Invoke-CHostTest `
 Invoke-CHostTest `
   -Name 'power_supervisor_test' `
   -TestRelativePath 'tests\power_supervisor_test.c' `
-  -ModuleRelativePath 'src\power_supervisor.c'
+  -ModuleRelativePath 'src\services\power_supervisor.c'
 Invoke-CHostTest `
   -Name 'motor_speed_control_test' `
   -TestRelativePath 'tests\motor_speed_control_test.c' `
-  -ModuleRelativePath 'src\motor_speed_control.c'
+  -ModuleRelativePath 'src\services\motor_speed_control.c'
