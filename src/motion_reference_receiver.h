@@ -76,25 +76,8 @@ uint8_t motion_reference_ingress_mailbox_take(
     motion_reference_ingress_mailbox_t *mailbox,
     motion_reference_ingress_t *ingress);
 
-/* Wrap-safe comparison for arrivals separated by less than 2^31 frames. */
-uint8_t motion_reference_arrived_before(uint32_t first,
-                                        uint32_t second);
-uint8_t motion_reference_is_after_barrier(uint32_t ingress_order,
-                                          uint32_t barrier_order,
-                                          uint8_t barrier_valid);
-uint8_t motion_reference_snapshot_is_visible(
-    uint32_t barrier_before,
-    uint32_t barrier_after,
-    uint32_t processed_after,
-    uint32_t accepted_before,
-    uint32_t accepted_after,
-    uint8_t session_valid,
-    uint8_t motion_active,
-    uint8_t busoff);
-uint8_t motion_reference_miss_requires_fault(
-    const agv_motion_reference_t *last_reference,
-    uint32_t now_ms,
-    uint8_t session_valid);
+/* 两个到达序号的间隔必须小于2^31。 */
+uint8_t motion_reference_is_after(uint32_t value, uint32_t barrier);
 
 #ifdef __cplusplus
 }

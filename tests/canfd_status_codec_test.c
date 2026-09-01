@@ -41,15 +41,12 @@ static void test_drive_status(void)
               "signed x uses two's complement little endian");
 }
 
-static void test_odom_and_motor_status(void)
+static void test_odom_status(void)
 {
   canfd_odom_status_t odom;
-  canfd_motor_status_t motor;
   uint8_t odom_payload[CANFD_ODOM_STATUS_PAYLOAD_SIZE];
-  uint8_t motor_payload[CANFD_MOTOR_STATUS_PAYLOAD_SIZE];
 
   memset(&odom, 0, sizeof(odom));
-  memset(&motor, 0, sizeof(motor));
   odom.uptime_ms = 0x12345678UL;
   odom.valid_flags = 0x0700U;
   odom.linear_mm_s = -300;
@@ -71,30 +68,6 @@ static void test_odom_and_motor_status(void)
               (odom_payload[26] == 30U),
               "signed IMU acceleration extends the odom payload");
 
-  motor.left_target_rpm_x100 = -1;
-  motor.right_target_rpm_x100 = 2;
-  motor.left_encoder_count = -3L;
-  motor.left_invalid_count = 4U;
-  motor.right_invalid_count = 5U;
-  motor.state = 6U;
-  motor.ir_activity = 1U;
-  motor.ir_activity_percent = 24U;
-  motor.ir_raw_level = 0U;
-  motor.ir_falling_edges = 0x1234U;
-  expect_true(canfd_status_encode_motor(&motor, motor_payload,
-                                        sizeof(motor_payload)) != 0U,
-              "motor status encodes");
-  expect_true((motor_payload[4] == 0xFFU) &&
-              (motor_payload[5] == 0xFFU),
-              "negative target rpm is preserved");
-  expect_true((motor_payload[24] == 4U) &&
-              (motor_payload[26] == 6U) &&
-              (motor_payload[27] == 1U) &&
-              (motor_payload[28] == 24U) &&
-              (motor_payload[29] == 0U) &&
-              (motor_payload[30] == 0x34U) &&
-              (motor_payload[31] == 0x12U),
-              "motor and IR diagnostics keep a stable layout");
 }
 
 static void test_safety_status_and_bounds(void)
@@ -120,81 +93,11 @@ static void test_safety_status_and_bounds(void)
               "null status is rejected");
 }
 
-static void test_dock_status(void)
-{
-  canfd_dock_status_t status;
-  uint8_t payload[CANFD_DOCK_STATUS_PAYLOAD_SIZE];
-
-  memset(&status, 0, sizeof(status));
-  status.sample_sequence = 0x12345678UL;
-  status.left_mm = 321U;
-  status.right_mm = 300U;
-  status.distance_error_mm = -12;
-  status.alignment_error_mm = 21;
-  status.ir_falling_edges = 9U;
-  status.flags = 0x7FU;
-  status.ir_activity_percent = 18U;
-  status.left_api_status = -3;
-  status.right_range_status = 4U;
-  status.bus_error = -14L;
-  status.left_raw_mm = 0x1234U;
-  status.right_raw_mm = 0x5678U;
-  expect_true(canfd_status_encode_dock(&status, payload,
-                                       sizeof(payload)) != 0U,
-              "dock status encodes");
-  expect_true((payload[4] == 0x78U) &&
-              (payload[7] == 0x12U) &&
-              (payload[8] == 0x41U) &&
-              (payload[9] == 0x01U),
-              "dock sequence and left distance are little endian");
-  expect_true((payload[12] == 0xF4U) &&
-              (payload[13] == 0xFFU) &&
-              (payload[18] == 0x7FU) &&
-              (payload[20] == 0xFDU),
-              "dock signed errors and flags are stable");
-  expect_true((payload[24] == 0xF2U) &&
-               (payload[27] == 0xFFU) &&
-               (payload[28] == 0x34U) &&
-               (payload[29] == 0x12U) &&
-               (payload[30] == 0x78U) &&
-               (payload[31] == 0x56U),
-               "dock bus error and raw distances are stable");
-}
-
-static void test_dock_scan(void)
-{
-  canfd_dock_scan_t status;
-  uint8_t payload[CANFD_DOCK_SCAN_PAYLOAD_SIZE];
-
-  memset(&status, 0, sizeof(status));
-  status.sample_sequence = 0x12345678UL;
-  status.sample_time_ms = 0x90ABCDEFUL;
-  status.left_raw_mm = 321U;
-  status.right_raw_mm = 654U;
-  status.flags = 0x0FU;
-  status.left_range_status = 2U;
-  status.right_range_status = 3U;
-  expect_true(canfd_status_encode_dock_scan(&status, payload,
-                                             sizeof(payload)) != 0U,
-              "dock scan encodes");
-  expect_true((payload[0] == 0x78U) && (payload[3] == 0x12U) &&
-               (payload[4] == 0xEFU) && (payload[7] == 0x90U) &&
-               (payload[8] == 0x41U) && (payload[9] == 0x01U) &&
-               (payload[10] == 0x8EU) && (payload[11] == 0x02U) &&
-               (payload[12] == 0x0FU) && (payload[15] == 0U),
-              "dock scan layout is stable");
-  expect_true(canfd_status_encode_dock_scan(
-                  &status, payload, sizeof(payload) - 1U) == 0U,
-              "short dock scan buffer is rejected");
-}
-
 int main(void)
 {
   test_drive_status();
-  test_odom_and_motor_status();
+  test_odom_status();
   test_safety_status_and_bounds();
-  test_dock_status();
-  test_dock_scan();
   if(failures != 0)
   {
     printf("CANFD_STATUS_CODEC_TEST_FAIL,%d\n", failures);

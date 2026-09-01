@@ -6,25 +6,32 @@
 ## 1. 准备
 
 - 小车架空，左右轮无接触，周围无人；
-- 准备独立断电手段、万用表和115200波特率UART记录；
+- 准备独立断电手段、万用表和SWD调试器；
 - 确认烧录BIN的SHA256与交付报告一致；
 - 电机板母线、电机和编码器接线保持正式整车状态。
 
 ## 2. 静止采集
 
-上电后记录至少10秒的：
+当前精简固件不保留调试UART和独立电气诊断PDO。连接生产AXF对应的SWD调试会话，
+周期读取并导出至少10秒的：
 
 ```text
-POWER,valid=1,raw=bus,left,right,bus_mv=...,current_ma=left,right,zero=left,right,samples=...,fault=0x..,ready=..
+adc_raw[0..2] = bus,left,right
+power_data = bus_mv,left_current_ma,right_current_ma,left_zero_raw,right_zero_raw,zero_samples,fault_mask,ready
 ```
+
+`adc_raw[0]`对应PA3母线，`adc_raw[1]`对应PA4左电流，`adc_raw[2]`对应PA5右电流。
+若当前SWD工具不能导出连续记录，本阶段视为未完成；不得用手工修改
+`limits_approved`代替标定证据。
 
 通过条件：
 
 - 约1.28秒后`samples=64`；
-- 只使用`valid=1`记录；`valid=0`表示本周期ADC样本不可用于拟合；
+- 只使用连续更新且没有`POWER_FAULT_ADC`的记录；ADC超时周期不可用于拟合；
 - 左右零点均不超过19 ADC码，静止后`current_ma`接近0；
 - 万用表母线电压与`bus_mv`方向一致，记录两者用于拟合增益/偏置；
-- `fault=0x02`且`ready=0`是当前预期，表示阈值尚未批准；
+- `fault_mask=0x02`且`ready=0`是当前预期，表示阈值尚未批准；CAN `0x481`
+  的`warning_mask`也应为`0x00000002`；
 - 不得出现ADC、欠压、过压或峰值电流故障位。
 
 若零点窗口无法完成、原始值抖动明显或母线换算错误，停止后续测试，先查模拟地、

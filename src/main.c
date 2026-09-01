@@ -23,9 +23,6 @@ int main(void)
   /* 初始化板级外设，例如延时函数和基础 GPIO。 */
   at32_board_init();
 
-  /* 初始化调试串口，后续 printf 会从 USART1 输出。 */
-  uart_print_init(115200);
-
   /* 调度器启动前完成电机、编码器和BMI270静态初始化。 */
   chassis_motion_controller_init();
 

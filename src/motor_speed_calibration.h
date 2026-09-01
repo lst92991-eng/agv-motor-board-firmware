@@ -20,13 +20,10 @@
 /* 20ms、2640 count/rev时单个计数约为1.14RPM。 */
 #define MOTOR_SPEED_FILTER_ALPHA                       0.20f
 
-/* Kd保持为零，避免正交编码器量化噪声被微分项放大。 */
 #define MOTOR_SPEED_LEFT_PID_KP                        4.0f
 #define MOTOR_SPEED_LEFT_PID_KI                        8.0f
-#define MOTOR_SPEED_LEFT_PID_KD                        0.0f
 #define MOTOR_SPEED_RIGHT_PID_KP                       4.0f
 #define MOTOR_SPEED_RIGHT_PID_KI                       8.0f
-#define MOTOR_SPEED_RIGHT_PID_KD                       0.0f
 #define MOTOR_SPEED_PID_CORRECTION_LIMIT             250.0f
 
 /* 目标存在但200ms无反馈时只锁存停车，不执行PWM脱困。 */

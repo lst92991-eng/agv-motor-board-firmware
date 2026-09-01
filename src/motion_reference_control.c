@@ -3,236 +3,173 @@
 #include <limits.h>
 #include <stddef.h>
 
-#define MOTION_REFERENCE_NUMERIC_MAX_GEOMETRY_MM 1000000.0f
-#define MOTION_REFERENCE_NUMERIC_MAX_WHEEL_RPM   1000000.0f
-
-static float motion_reference_abs_float(float value)
+static float motion_abs(float value)
 {
   return (value < 0.0f) ? -value : value;
 }
 
-static uint32_t motion_reference_abs_i16(int16_t value)
+static float motion_clamp(float value, float limit)
 {
-  int32_t widened = value;
-
-  return (uint32_t)((widened < 0) ? -widened : widened);
+  if(value > limit) return limit;
+  if(value < -limit) return -limit;
+  return value;
 }
 
-static uint8_t motion_reference_limits_are_valid(
-    const motion_reference_platform_limits_t *limits)
+static uint8_t motion_limits_valid(
+    const motion_reference_platform_limits_t *limit)
 {
-  if((limits == NULL) ||
-     (limits->max_linear_mm_s == 0U) ||
-     (limits->max_linear_mm_s > INT16_MAX) ||
-     (limits->max_angular_mrad_s == 0U) ||
-     (limits->max_angular_mrad_s > INT16_MAX) ||
-     (limits->min_accel_mm_s2 == 0U) ||
-     (limits->min_accel_mm_s2 > limits->max_accel_mm_s2) ||
-     (limits->min_decel_mm_s2 == 0U) ||
-     (limits->min_decel_mm_s2 > limits->max_decel_mm_s2) ||
-     !(limits->drive_track_mm > 0.0f) ||
-     (limits->drive_track_mm > MOTION_REFERENCE_NUMERIC_MAX_GEOMETRY_MM) ||
-     !(limits->wheel_circumference_mm > 0.0f) ||
-     (limits->wheel_circumference_mm >
-      MOTION_REFERENCE_NUMERIC_MAX_GEOMETRY_MM) ||
-     !(limits->max_wheel_rpm > 0.0f) ||
-     (limits->max_wheel_rpm > MOTION_REFERENCE_NUMERIC_MAX_WHEEL_RPM) ||
-     !(limits->yaw_rate_feedback_gain >= 0.0f) ||
-     (limits->yaw_rate_feedback_gain > 10.0f))
-  {
-    return 0U;
-  }
-  return 1U;
+  return ((limit != NULL) &&
+      (limit->max_linear_mm_s > 0U) &&
+      (limit->max_linear_mm_s <= INT16_MAX) &&
+      (limit->max_angular_mrad_s > 0U) &&
+      (limit->max_angular_mrad_s <= INT16_MAX) &&
+      (limit->min_accel_mm_s2 > 0U) &&
+      (limit->min_accel_mm_s2 <= limit->max_accel_mm_s2) &&
+      (limit->min_decel_mm_s2 > 0U) &&
+      (limit->min_decel_mm_s2 <= limit->max_decel_mm_s2) &&
+      (limit->drive_track_mm > 0.0f) &&
+      (limit->wheel_circumference_mm > 0.0f) &&
+      (limit->max_wheel_rpm > 0.0f) &&
+      (limit->yaw_rate_feedback_gain >= 0.0f) &&
+      (limit->yaw_rate_feedback_gain <= 10.0f)) ? 1U : 0U;
 }
 
-static uint8_t motion_reference_body_is_within_limits(
+static uint8_t motion_reference_valid(
     const agv_motion_reference_t *reference,
-    const motion_reference_platform_limits_t *limits)
+    const motion_reference_platform_limits_t *limit)
 {
-  if((agv_motion_reference_is_valid(reference) == 0U) ||
-     ((reference->kind == (uint8_t)AGV_MOTION_KIND_BODY_VELOCITY) &&
-      ((motion_reference_abs_i16(reference->linear_mm_s) >
-        limits->max_linear_mm_s) ||
-       (motion_reference_abs_i16(reference->angular_mrad_s) >
-        limits->max_angular_mrad_s) ||
-       (reference->accel_mm_s2 < limits->min_accel_mm_s2) ||
-       (reference->accel_mm_s2 > limits->max_accel_mm_s2) ||
-       (reference->decel_mm_s2 < limits->min_decel_mm_s2) ||
-       (reference->decel_mm_s2 > limits->max_decel_mm_s2))))
-  {
-    return 0U;
-  }
-  return 1U;
+  int32_t linear;
+  int32_t angular;
+
+  if((motion_limits_valid(limit) == 0U) ||
+     (agv_motion_reference_is_valid(reference) == 0U)) return 0U;
+  if(reference->kind == AGV_MOTION_KIND_HOLD) return 1U;
+  linear = reference->linear_mm_s;
+  angular = reference->angular_mrad_s;
+  if(linear < 0) linear = -linear;
+  if(angular < 0) angular = -angular;
+  return (((uint32_t)linear <= limit->max_linear_mm_s) &&
+      ((uint32_t)angular <= limit->max_angular_mrad_s) &&
+      (reference->accel_mm_s2 >= limit->min_accel_mm_s2) &&
+      (reference->accel_mm_s2 <= limit->max_accel_mm_s2) &&
+      (reference->decel_mm_s2 >= limit->min_decel_mm_s2) &&
+      (reference->decel_mm_s2 <= limit->max_decel_mm_s2)) ? 1U : 0U;
 }
 
-static void motion_reference_compute_body(
-    float linear_mm_s,
-    float angular_mrad_s,
-    const motion_reference_platform_limits_t *limits,
-    motion_reference_wheel_targets_t *targets)
+static void motion_wheels(float linear_mm_s, float angular_mrad_s,
+                          const motion_reference_platform_limits_t *limit,
+                          motion_reference_wheel_targets_t *target)
 {
-  float turn_speed_mm_s;
-  float maximum_rpm;
+  float turn = limit->drive_track_mm * angular_mrad_s / 2000.0f;
+  float maximum;
 
-  targets->common_scale = 1.0f;
-  targets->slew_scale = 1.0f;
-  turn_speed_mm_s = (limits->drive_track_mm * angular_mrad_s) / 2000.0f;
-  targets->left_rpm = ((linear_mm_s - turn_speed_mm_s) * 60.0f) /
-                      limits->wheel_circumference_mm;
-  targets->right_rpm = ((linear_mm_s + turn_speed_mm_s) * 60.0f) /
-                       limits->wheel_circumference_mm;
-  maximum_rpm = motion_reference_abs_float(targets->left_rpm);
-  if(motion_reference_abs_float(targets->right_rpm) > maximum_rpm)
-  {
-    maximum_rpm = motion_reference_abs_float(targets->right_rpm);
-  }
-  if(maximum_rpm > limits->max_wheel_rpm)
-  {
-    targets->common_scale = limits->max_wheel_rpm / maximum_rpm;
-    targets->left_rpm *= targets->common_scale;
-    targets->right_rpm *= targets->common_scale;
-  }
+  target->left_rpm = (linear_mm_s - turn) * 60.0f /
+      limit->wheel_circumference_mm;
+  target->right_rpm = (linear_mm_s + turn) * 60.0f /
+      limit->wheel_circumference_mm;
+  maximum = motion_abs(target->left_rpm);
+  if(motion_abs(target->right_rpm) > maximum)
+    maximum = motion_abs(target->right_rpm);
+  target->common_scale = (maximum > limit->max_wheel_rpm) ?
+      limit->max_wheel_rpm / maximum : 1.0f;
+  target->left_rpm *= target->common_scale;
+  target->right_rpm *= target->common_scale;
+  target->slew_scale = 1.0f;
 }
 
 uint8_t motion_reference_control_compute(
     const agv_motion_reference_t *reference,
-    const motion_reference_platform_limits_t *limits,
-    motion_reference_wheel_targets_t *targets)
+    const motion_reference_platform_limits_t *limit,
+    motion_reference_wheel_targets_t *target)
 {
-  if((targets == NULL) ||
-     (motion_reference_limits_are_valid(limits) == 0U) ||
-     (motion_reference_body_is_within_limits(reference, limits) == 0U))
+  if((target == NULL) ||
+     (motion_reference_valid(reference, limit) == 0U)) return 0U;
+  if(reference->kind == AGV_MOTION_KIND_HOLD)
   {
-    return 0U;
+    target->left_rpm = target->right_rpm = 0.0f;
+    target->common_scale = target->slew_scale = 1.0f;
   }
-
-  if(reference->kind == (uint8_t)AGV_MOTION_KIND_HOLD)
+  else
   {
-    targets->left_rpm = 0.0f;
-    targets->right_rpm = 0.0f;
-    targets->common_scale = 1.0f;
-    targets->slew_scale = 1.0f;
-    return 1U;
+    motion_wheels((float)reference->linear_mm_s,
+        (float)reference->angular_mrad_s, limit, target);
   }
-
-  motion_reference_compute_body((float)reference->linear_mm_s,
-                                (float)reference->angular_mrad_s,
-                                limits, targets);
   return 1U;
 }
 
 void motion_reference_control_reset(motion_reference_control_t *control)
 {
-  if(control != NULL)
-  {
-    control->left_rpm = 0.0f;
-    control->right_rpm = 0.0f;
-  }
+  if(control != NULL) control->left_rpm = control->right_rpm = 0.0f;
 }
 
-static float motion_reference_wheel_step_limit(float current_rpm,
-                                               float target_rpm,
-                                               float accel_step_rpm,
-                                               float decel_step_rpm)
+static float motion_step_limit(float current, float target,
+                               float accel, float decel)
 {
-  return (((current_rpm * target_rpm) >= 0.0f) &&
-          (motion_reference_abs_float(target_rpm) >
-           motion_reference_abs_float(current_rpm))) ?
-         accel_step_rpm : decel_step_rpm;
+  return (((current * target) >= 0.0f) &&
+          (motion_abs(target) > motion_abs(current))) ? accel : decel;
 }
 
 uint8_t motion_reference_control_step(
     motion_reference_control_t *control,
     const agv_motion_reference_t *reference,
-    const motion_reference_platform_limits_t *limits,
+    const motion_reference_platform_limits_t *limit,
     float actual_yaw_rate_mrad_s,
     float dt_s,
-    motion_reference_wheel_targets_t *targets)
+    motion_reference_wheel_targets_t *target)
 {
   motion_reference_wheel_targets_t desired;
-  float corrected_angular_mrad_s;
-  float accel_step_rpm;
-  float decel_step_rpm;
-  float left_delta_rpm;
-  float right_delta_rpm;
-  float left_step_limit_rpm;
-  float right_step_limit_rpm;
-  float slew_scale = 1.0f;
-  uint8_t reversing;
+  float angular;
+  float accel;
+  float decel;
+  float left_delta;
+  float right_delta;
+  float scale = 1.0f;
+  float candidate;
 
-  if((control == NULL) || (targets == NULL) ||
-     (motion_reference_limits_are_valid(limits) == 0U) ||
-     (motion_reference_body_is_within_limits(reference, limits) == 0U) ||
-     !(dt_s > 0.0f) || (dt_s > 1.0f) ||
-     !((actual_yaw_rate_mrad_s >= -1000000.0f) &&
-       (actual_yaw_rate_mrad_s <= 1000000.0f)))
-  {
-    return 0U;
-  }
-  if(reference->kind == (uint8_t)AGV_MOTION_KIND_HOLD)
+  if((control == NULL) || (target == NULL) ||
+     (motion_reference_valid(reference, limit) == 0U) ||
+     (dt_s <= 0.0f) || (dt_s > 1.0f) ||
+     (actual_yaw_rate_mrad_s < -1000000.0f) ||
+     (actual_yaw_rate_mrad_s > 1000000.0f)) return 0U;
+  if(reference->kind == AGV_MOTION_KIND_HOLD)
   {
     motion_reference_control_reset(control);
-    targets->left_rpm = 0.0f;
-    targets->right_rpm = 0.0f;
-    targets->common_scale = 1.0f;
-    targets->slew_scale = 1.0f;
-    return 1U;
+    return motion_reference_control_compute(reference, limit, target);
   }
 
-  corrected_angular_mrad_s = (float)reference->angular_mrad_s +
-      (limits->yaw_rate_feedback_gain *
-       ((float)reference->angular_mrad_s - actual_yaw_rate_mrad_s));
-  if(corrected_angular_mrad_s > (float)limits->max_angular_mrad_s)
-  {
-    corrected_angular_mrad_s = (float)limits->max_angular_mrad_s;
-  }
-  else if(corrected_angular_mrad_s <
-          -(float)limits->max_angular_mrad_s)
-  {
-    corrected_angular_mrad_s = -(float)limits->max_angular_mrad_s;
-  }
-  motion_reference_compute_body((float)reference->linear_mm_s,
-                                corrected_angular_mrad_s,
-                                limits, &desired);
+  angular = (float)reference->angular_mrad_s +
+      limit->yaw_rate_feedback_gain *
+      ((float)reference->angular_mrad_s - actual_yaw_rate_mrad_s);
+  angular = motion_clamp(angular, (float)limit->max_angular_mrad_s);
+  motion_wheels((float)reference->linear_mm_s, angular, limit, &desired);
+  if(((control->left_rpm * desired.left_rpm) < 0.0f) ||
+     ((control->right_rpm * desired.right_rpm) < 0.0f))
+    desired.left_rpm = desired.right_rpm = 0.0f;
 
-  reversing = (((control->left_rpm * desired.left_rpm) < 0.0f) ||
-               ((control->right_rpm * desired.right_rpm) < 0.0f)) ? 1U : 0U;
-  if(reversing != 0U)
+  accel = reference->accel_mm_s2 * dt_s * 60.0f /
+      limit->wheel_circumference_mm;
+  decel = reference->decel_mm_s2 * dt_s * 60.0f /
+      limit->wheel_circumference_mm;
+  left_delta = desired.left_rpm - control->left_rpm;
+  right_delta = desired.right_rpm - control->right_rpm;
+  if(motion_abs(left_delta) > 0.0f)
   {
-    desired.left_rpm = 0.0f;
-    desired.right_rpm = 0.0f;
+    candidate = motion_step_limit(control->left_rpm, desired.left_rpm,
+                                  accel, decel) / motion_abs(left_delta);
+    if(candidate < scale) scale = candidate;
   }
-  accel_step_rpm = ((float)reference->accel_mm_s2 * dt_s * 60.0f) /
-                   limits->wheel_circumference_mm;
-  decel_step_rpm = ((float)reference->decel_mm_s2 * dt_s * 60.0f) /
-                   limits->wheel_circumference_mm;
-  left_delta_rpm = desired.left_rpm - control->left_rpm;
-  right_delta_rpm = desired.right_rpm - control->right_rpm;
-  left_step_limit_rpm = motion_reference_wheel_step_limit(
-      control->left_rpm, desired.left_rpm,
-      accel_step_rpm, decel_step_rpm);
-  right_step_limit_rpm = motion_reference_wheel_step_limit(
-      control->right_rpm, desired.right_rpm,
-      accel_step_rpm, decel_step_rpm);
-  if((motion_reference_abs_float(left_delta_rpm) > left_step_limit_rpm) &&
-     ((left_step_limit_rpm /
-       motion_reference_abs_float(left_delta_rpm)) < slew_scale))
+  if(motion_abs(right_delta) > 0.0f)
   {
-    slew_scale = left_step_limit_rpm /
-                 motion_reference_abs_float(left_delta_rpm);
+    candidate = motion_step_limit(control->right_rpm, desired.right_rpm,
+                                  accel, decel) / motion_abs(right_delta);
+    if(candidate < scale) scale = candidate;
   }
-  if((motion_reference_abs_float(right_delta_rpm) > right_step_limit_rpm) &&
-     ((right_step_limit_rpm /
-       motion_reference_abs_float(right_delta_rpm)) < slew_scale))
-  {
-    slew_scale = right_step_limit_rpm /
-                 motion_reference_abs_float(right_delta_rpm);
-  }
-  control->left_rpm += left_delta_rpm * slew_scale;
-  control->right_rpm += right_delta_rpm * slew_scale;
-  targets->left_rpm = control->left_rpm;
-  targets->right_rpm = control->right_rpm;
-  targets->common_scale = desired.common_scale;
-  targets->slew_scale = slew_scale;
+  if(scale > 1.0f) scale = 1.0f;
+  control->left_rpm += left_delta * scale;
+  control->right_rpm += right_delta * scale;
+  *target = desired;
+  target->left_rpm = control->left_rpm;
+  target->right_rpm = control->right_rpm;
+  target->slew_scale = scale;
   return 1U;
 }

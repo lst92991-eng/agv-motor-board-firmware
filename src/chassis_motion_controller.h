@@ -24,7 +24,6 @@ void chassis_motion_controller_step_10ms(void);
 /* CAN FD应答和状态上报读取的只读状态。 */
 uint8_t chassis_motion_controller_get_state(void);
 uint16_t chassis_motion_controller_get_fault_mask(void);
-uint32_t chassis_motion_controller_get_uptime_ms(void);
 uint32_t chassis_motion_controller_get_power_status_snapshot(void);
 uint8_t chassis_motion_controller_has_power_fault(void);
 

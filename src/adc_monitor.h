@@ -25,9 +25,6 @@ uint8_t adc_monitor_update(void);
 /* 读取最近一次采集的12位ADC原始值。 */
 uint16_t adc_monitor_get_raw(adc_monitor_channel_t channel);
 
-/* 读取最近一次采集的引脚电压，单位为mV。 */
-uint32_t adc_monitor_get_mv(adc_monitor_channel_t channel);
-
 #ifdef __cplusplus
 }
 #endif

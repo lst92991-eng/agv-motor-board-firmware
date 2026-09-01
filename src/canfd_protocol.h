@@ -17,9 +17,6 @@ extern "C" {
 #define CANFD_ID_ODOM_STATUS                 0x381U
 #define CANFD_ID_MOTION_REFERENCE            AGV_CAN_ID_MOTION_REFERENCE
 #define CANFD_ID_SAFETY_STATUS               0x481U
-#define CANFD_ID_MOTOR_DIAGNOSTIC             0x581U
-#define CANFD_ID_DOCK_STATUS                  0x582U
-#define CANFD_ID_DOCK_SCAN                    0x583U
 
 typedef enum
 {
@@ -65,57 +62,6 @@ typedef struct
 typedef struct
 {
   uint32_t uptime_ms;
-  int16_t left_target_rpm_x100;
-  int16_t right_target_rpm_x100;
-  int16_t left_measured_rpm_x100;
-  int16_t right_measured_rpm_x100;
-  int16_t left_pwm;
-  int16_t right_pwm;
-  int32_t left_encoder_count;
-  int32_t right_encoder_count;
-  uint8_t left_invalid_count;
-  uint8_t right_invalid_count;
-  uint8_t state;
-  uint8_t ir_activity;
-  uint8_t ir_activity_percent;
-  uint8_t ir_raw_level;
-  uint16_t ir_falling_edges;
-} canfd_motor_status_t;
-
-typedef struct
-{
-  uint32_t uptime_ms;
-  uint32_t sample_sequence;
-  uint16_t left_mm;
-  uint16_t right_mm;
-  int16_t distance_error_mm;
-  int16_t alignment_error_mm;
-  uint16_t ir_falling_edges;
-  uint8_t flags;
-  uint8_t ir_activity_percent;
-  int8_t left_api_status;
-  int8_t right_api_status;
-  uint8_t left_range_status;
-  uint8_t right_range_status;
-  int32_t bus_error;
-  uint16_t left_raw_mm;
-  uint16_t right_raw_mm;
-} canfd_dock_status_t;
-
-typedef struct
-{
-  uint32_t sample_sequence;
-  uint32_t sample_time_ms;
-  uint16_t left_raw_mm;
-  uint16_t right_raw_mm;
-  uint8_t flags;
-  uint8_t left_range_status;
-  uint8_t right_range_status;
-} canfd_dock_scan_t;
-
-typedef struct
-{
-  uint32_t uptime_ms;
   uint32_t fault_mask;
   uint32_t warning_mask;
   uint8_t bumper_mask;
@@ -141,22 +87,13 @@ void canfd_protocol_send_motion_result(
 
 void canfd_protocol_send_drive_status(const canfd_drive_status_t *status);
 void canfd_protocol_send_odom_status(const canfd_odom_status_t *status);
-void canfd_protocol_send_motor_status(const canfd_motor_status_t *status);
-void canfd_protocol_send_dock_status(const canfd_dock_status_t *status);
-void canfd_protocol_send_dock_scan(const canfd_dock_scan_t *status);
 void canfd_protocol_send_safety_status(
     const canfd_safety_status_t *status,
     uint8_t urgent);
 
-uint16_t canfd_protocol_get_link_age_ms(uint32_t now_ms);
 uint32_t canfd_protocol_get_session_id(void);
 uint8_t canfd_protocol_is_session_valid(void);
-uint8_t canfd_protocol_get_bus_state_flags(void);
 uint8_t canfd_protocol_is_bus_healthy(void);
-uint32_t canfd_protocol_get_rx_count(void);
-uint32_t canfd_protocol_get_tx_count(void);
-uint32_t canfd_protocol_get_rx_drop_count(void);
-uint32_t canfd_protocol_get_tx_drop_count(void);
 
 /*
  * Return the newest accepted 0x401 reference while its effective TTL is

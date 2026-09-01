@@ -59,11 +59,6 @@ Invoke-CHostTest `
   -ModuleRelativePath 'src\motion_reference_receiver.c', `
                       'src\motion_reference_control.c'
 Invoke-CHostTest `
-  -Name 'serial_motion_protocol_test' `
-  -TestRelativePath 'tests\serial_motion_protocol_test.c' `
-  -ModuleRelativePath 'src\serial_motion_protocol.c', `
-                      'src\motion_command.c'
-Invoke-CHostTest `
   -Name 'system_watchdog_test' `
   -TestRelativePath 'tests\system_watchdog_test.c' `
   -ModuleRelativePath @()
@@ -74,5 +69,4 @@ Invoke-CHostTest `
 Invoke-CHostTest `
   -Name 'motor_speed_control_test' `
   -TestRelativePath 'tests\motor_speed_control_test.c' `
-  -ModuleRelativePath 'src\motor_speed_control.c', `
-                      'src\motor_pid.c'
+  -ModuleRelativePath 'src\motor_speed_control.c'

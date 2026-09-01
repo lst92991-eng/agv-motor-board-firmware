@@ -29,7 +29,6 @@ static void test_stationary_encoder_constrains_gyro_bias(void)
   }
 
   expect_near("stationary fused yaw", fusion.fused_yaw_deg, 0.20f, 0.02f);
-  expect_near("stationary gyro yaw", fusion.gyro_yaw_deg, 2.0f, 0.02f);
 }
 
 static void test_consistent_left_turn_tracks_ninety_degrees(void)
@@ -44,7 +43,6 @@ static void test_consistent_left_turn_tracks_ninety_degrees(void)
   }
 
   expect_near("left turn fused yaw", fusion.fused_yaw_deg, 90.0f, 0.05f);
-  expect_near("left turn disagreement", fusion.disagreement_deg, 0.0f, 0.05f);
 }
 
 static void test_encoder_spike_is_rejected(void)

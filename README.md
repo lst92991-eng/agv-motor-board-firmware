@@ -11,10 +11,8 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
 | 任务 | 周期 | 职责 |
 | --- | ---: | --- |
 | `ChassisCtrl` | 10ms | 唯一参考执行器、本地安全、里程计与遥测 |
-| `SerialComm` | 2ms | 调试串口命令解析 |
 | `CANFD` | 2ms | 整车CAN FD协议、控制租约和命令结果 |
 | `PowerMonitor` | 20ms | ADC、电流/母线监督与故障提交 |
-| `DockSensors` | 5ms | 双TOF和红外采集，只上报观测 |
 | `Watchdog` | 20ms | Control/CAN/Power均推进时才喂狗 |
 
 ## 已验收能力
@@ -25,7 +23,7 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
   尚待重新烧录回归；
 - 四路防撞条本地锁存停车；
 - CAN FD 500k/4M BRS、200ms控制租约、bus-off与通信超时停车；
-- 调试串口和整车CAN诊断帧。
+- 整车CAN状态、里程计和安全帧。
 
 关键生产模块边界：
 
@@ -34,14 +32,9 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
 - `canfd_protocol.*`：CAN硬件队列、命令、租约和bus-off恢复；
 - `canfd_status_codec.*`：状态PDO固定小端字节布局，可在主机独立回归。
 
-## 已沉淀但未接入运行任务
-
-- `dock_tof_sensor.*`：双VL53L0X采集、滤波、距离和对准误差；
-- `dock_ir_receiver.*`：IRM-H238T原始38kHz载波状态；
-- `power_supervisor.*`、`adc_monitor.*`、`motor_current.*`：失效关闭的电流/母线监督。
-
-这些模块不代表充电对准或完整电流环已经完成。未接入的PN532/RFID源码已移出
-生产树；未来只能作为事件producer接入Supervisor，不能恢复电机板运动分支。
+TOF和IR已经移出生产固件，后续属于独立对桩传感节点。电机板只保留
+`power_supervisor.*`与`adc_monitor.*`的失效关闭电流/母线监督。PN532/RFID未来
+只能作为上层事件producer接入，不能恢复电机板运动分支。
 
 ## 构建
 
@@ -58,10 +51,9 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
 & .\tools\run_host_tests.ps1
 ```
 
-当前覆盖航向融合、CAN FD状态PDO、运动参考、维护串口、看门狗、电气监督和速度环。
-
-首次电气标定时，PowerMonitor每500ms通过非阻塞UART输出`POWER,...`原始ADC、
-换算值、零点、故障和Ready状态。测试顺序见
+当前覆盖航向融合、CAN FD状态PDO、运动参考、看门狗、电气监督和速度环。
+当前精简固件不保留调试UART和独立电气诊断PDO；首次电气标定只能通过SWD读取
+原始ADC与监督状态。在标定证据批准前，`limits_approved=0`会保持禁止运动。测试顺序见
 [电气监督首次标定](hardware/power_commissioning_acceptance.md)。
 
 ## 关键文档
@@ -70,4 +62,4 @@ AT32F456RCT7底盘控制固件。当前生产版本使用FreeRTOS，通过CAN FD
 - [磁条循迹验收](hardware/chassis_magnetic_straight_validation_2026-08-18.md)
 - [四方向验收](hardware/chassis_four_direction_ground_validation_2026-08-18.md)
 - [安全与防撞回归](hardware/chassis_p0_safety_and_bumper_regression_2026-08-17.md)
-- [整车CAN FD协议](hardware/canfd_protocol_v1.md)
+- [整车CANopen FD协议](../../docs/AGV_CANopen_FD_Protocol_V0.2.md)

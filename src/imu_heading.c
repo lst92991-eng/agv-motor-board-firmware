@@ -12,7 +12,6 @@
 
 #include <math.h>
 #include <stddef.h>
-#include <stdio.h>
 
 #include "at32f45x_board.h"
 #include "bmi270.h"
@@ -47,12 +46,7 @@ static uint8_t imu_heading_spi_mode3;
 static uint8_t imu_heading_read_dummy = 1U;
 static struct bmi2_dev imu_heading_dev;
 static int8_t imu_heading_status = BMI2_E_COM_FAIL;
-static float imu_heading_gyro_x_zero_dps;
-static float imu_heading_gyro_y_zero_dps;
 static float imu_heading_gyro_z_zero_dps;
-static float imu_heading_vertical_x;
-static float imu_heading_vertical_y;
-static float imu_heading_vertical_z;
 static float imu_heading_gravity_x_raw;
 static float imu_heading_gravity_y_raw;
 static float imu_heading_gravity_z_raw;
@@ -60,7 +54,6 @@ static float imu_heading_accel_raw_per_g;
 static int16_t imu_heading_linear_accel_x_mg;
 static int16_t imu_heading_linear_accel_y_mg;
 static int16_t imu_heading_linear_accel_z_mg;
-static float imu_heading_yaw_deg;
 static float imu_heading_rate_dps;
 static float imu_heading_raw_rate_dps;
 static float imu_heading_filtered_rate_dps;
@@ -302,13 +295,6 @@ static int8_t imu_heading_probe_spi(void)
   id_mode3_dummy = imu_heading_reg_read(BMI2_CHIP_ID_ADDR, 1U);
   id_mode3_no_dummy = imu_heading_reg_read(BMI2_CHIP_ID_ADDR, 0U);
 
-  printf("chip_id probe: m0+d=0x%02X m0=0x%02X m3+d=0x%02X m3=0x%02X expected=0x%02X\r\n",
-         id_mode0_dummy,
-         id_mode0_no_dummy,
-         id_mode3_dummy,
-         id_mode3_no_dummy,
-         BMI270_CHIP_ID);
-
   if(id_mode0_dummy == BMI270_CHIP_ID)
   {
     imu_heading_spi_mode3 = 0U;
@@ -335,9 +321,6 @@ static int8_t imu_heading_probe_spi(void)
   }
 
   imu_heading_spi_gpio_init();
-  printf("selected spi: mode%d, read_dummy=%u\r\n",
-         (imu_heading_spi_mode3 != 0U) ? 3 : 0,
-         imu_heading_read_dummy);
   return BMI2_OK;
 }
 
@@ -400,29 +383,17 @@ static int8_t imu_heading_calibrate(void)
   struct bmi2_sens_data sensor_data;
   uint16_t valid_count = 0U;
   uint16_t attempt_count = 0U;
-  float gyro_x_sum = 0.0f;
-  float gyro_y_sum = 0.0f;
   float gyro_z_sum = 0.0f;
-  float gyro_x_square_sum = 0.0f;
-  float gyro_y_square_sum = 0.0f;
   float gyro_z_square_sum = 0.0f;
-  float gyro_xy_sum = 0.0f;
-  float gyro_xz_sum = 0.0f;
-  float gyro_yz_sum = 0.0f;
   float accel_x_sum = 0.0f;
   float accel_y_sum = 0.0f;
   float accel_z_sum = 0.0f;
-  float gyro_x_dps;
-  float gyro_y_dps;
   float gyro_z_dps;
   float accel_norm;
   float expected_one_g;
   float gravity_ratio;
-  float projected_mean_dps;
-  float projected_square_mean;
   float noise_variance;
 
-  printf("BMI270 heading calibration, keep vehicle still...\r\n");
   while((valid_count < IMU_HEADING_CALIB_SAMPLE_COUNT) &&
         (attempt_count < IMU_HEADING_CALIB_MAX_ATTEMPTS))
   {
@@ -433,18 +404,9 @@ static int8_t imu_heading_calibrate(void)
        ((sensor_data.status & BMI2_DRDY_GYR) != 0U) &&
        ((sensor_data.status & BMI2_DRDY_ACC) != 0U))
     {
-      gyro_x_dps = imu_heading_raw_to_dps(sensor_data.gyr.x);
-      gyro_y_dps = imu_heading_raw_to_dps(sensor_data.gyr.y);
       gyro_z_dps = imu_heading_raw_to_dps(sensor_data.gyr.z);
-      gyro_x_sum += gyro_x_dps;
-      gyro_y_sum += gyro_y_dps;
       gyro_z_sum += gyro_z_dps;
-      gyro_x_square_sum += gyro_x_dps * gyro_x_dps;
-      gyro_y_square_sum += gyro_y_dps * gyro_y_dps;
       gyro_z_square_sum += gyro_z_dps * gyro_z_dps;
-      gyro_xy_sum += gyro_x_dps * gyro_y_dps;
-      gyro_xz_sum += gyro_x_dps * gyro_z_dps;
-      gyro_yz_sum += gyro_y_dps * gyro_z_dps;
       accel_x_sum += (float)sensor_data.acc.x;
       accel_y_sum += (float)sensor_data.acc.y;
       accel_z_sum += (float)sensor_data.acc.z;
@@ -454,22 +416,16 @@ static int8_t imu_heading_calibrate(void)
 
   if(valid_count != IMU_HEADING_CALIB_SAMPLE_COUNT)
   {
-    printf("BMI270 heading calibration failed samples=%u\r\n", valid_count);
     return (result == BMI2_OK) ? BMI2_E_COM_FAIL : result;
   }
 
-  imu_heading_gyro_x_zero_dps = gyro_x_sum / (float)valid_count;
-  imu_heading_gyro_y_zero_dps = gyro_y_sum / (float)valid_count;
   imu_heading_gyro_z_zero_dps = gyro_z_sum / (float)valid_count;
   imu_heading_gravity_x_raw = accel_x_sum / (float)valid_count;
   imu_heading_gravity_y_raw = accel_y_sum / (float)valid_count;
   imu_heading_gravity_z_raw = accel_z_sum / (float)valid_count;
-  imu_heading_vertical_x = imu_heading_gravity_x_raw;
-  imu_heading_vertical_y = imu_heading_gravity_y_raw;
-  imu_heading_vertical_z = imu_heading_gravity_z_raw;
-  accel_norm = sqrtf((imu_heading_vertical_x * imu_heading_vertical_x) +
-                     (imu_heading_vertical_y * imu_heading_vertical_y) +
-                     (imu_heading_vertical_z * imu_heading_vertical_z));
+  accel_norm = sqrtf((imu_heading_gravity_x_raw * imu_heading_gravity_x_raw) +
+                     (imu_heading_gravity_y_raw * imu_heading_gravity_y_raw) +
+                     (imu_heading_gravity_z_raw * imu_heading_gravity_z_raw));
   expected_one_g = ((float)(1UL << (imu_heading_dev.resolution - 1U))) /
                    IMU_HEADING_ACCEL_RANGE_G;
   imu_heading_accel_raw_per_g = expected_one_g;
@@ -477,33 +433,10 @@ static int8_t imu_heading_calibrate(void)
   if((gravity_ratio < IMU_HEADING_MIN_GRAVITY_RATIO) ||
      (gravity_ratio > IMU_HEADING_MAX_GRAVITY_RATIO))
   {
-    printf("BMI270 heading gravity invalid ratio=%.3f\r\n", gravity_ratio);
     return BMI2_E_COM_FAIL;
   }
-  imu_heading_vertical_x /= accel_norm;
-  imu_heading_vertical_y /= accel_norm;
-  imu_heading_vertical_z /= accel_norm;
-  /* 静止加速度计的 +1g 方向即物理向上，直接保留其符号以定义正 Yaw。 */
-
-  projected_mean_dps =
-      (imu_heading_gyro_x_zero_dps * imu_heading_vertical_x) +
-      (imu_heading_gyro_y_zero_dps * imu_heading_vertical_y) +
-      (imu_heading_gyro_z_zero_dps * imu_heading_vertical_z);
-  projected_square_mean =
-      ((gyro_x_square_sum * imu_heading_vertical_x *
-        imu_heading_vertical_x) +
-       (gyro_y_square_sum * imu_heading_vertical_y *
-        imu_heading_vertical_y) +
-       (gyro_z_square_sum * imu_heading_vertical_z *
-        imu_heading_vertical_z) +
-       (2.0f * gyro_xy_sum * imu_heading_vertical_x *
-        imu_heading_vertical_y) +
-       (2.0f * gyro_xz_sum * imu_heading_vertical_x *
-        imu_heading_vertical_z) +
-       (2.0f * gyro_yz_sum * imu_heading_vertical_y *
-        imu_heading_vertical_z)) / (float)valid_count;
-  noise_variance = projected_square_mean -
-                   (projected_mean_dps * projected_mean_dps);
+  noise_variance = gyro_z_square_sum / (float)valid_count -
+      imu_heading_gyro_z_zero_dps * imu_heading_gyro_z_zero_dps;
   if(noise_variance < 0.0f)
   {
     noise_variance = 0.0f;
@@ -511,8 +444,6 @@ static int8_t imu_heading_calibrate(void)
   imu_heading_noise_sigma_dps = sqrtf(noise_variance);
   if(imu_heading_noise_sigma_dps > IMU_HEADING_CALIB_MAX_SIGMA_DPS)
   {
-    printf("BMI270 heading calibration moving sigma=%.3f dps\r\n",
-           imu_heading_noise_sigma_dps);
     return BMI2_E_COM_FAIL;
   }
   imu_heading_deadband_dps = imu_heading_limit(
@@ -520,24 +451,12 @@ static int8_t imu_heading_calibrate(void)
       IMU_HEADING_DEADBAND_SIGMA_MULTIPLIER,
       IMU_HEADING_DEADBAND_MIN_DPS,
       IMU_HEADING_DEADBAND_MAX_DPS);
-  imu_heading_yaw_deg = 0.0f;
   imu_heading_rate_dps = 0.0f;
   imu_heading_raw_rate_dps = 0.0f;
   imu_heading_filtered_rate_dps = 0.0f;
   imu_heading_linear_accel_x_mg = 0;
   imu_heading_linear_accel_y_mg = 0;
   imu_heading_linear_accel_z_mg = 0;
-  printf("heading gyro_zero=%.3f,%.3f,%.3f axis=%.3f,%.3f,%.3f "
-         "sigma=%.3f deadband=%.3f dps samples=%u\r\n",
-         imu_heading_gyro_x_zero_dps,
-         imu_heading_gyro_y_zero_dps,
-         imu_heading_gyro_z_zero_dps,
-         imu_heading_vertical_x,
-         imu_heading_vertical_y,
-         imu_heading_vertical_z,
-         imu_heading_noise_sigma_dps,
-         imu_heading_deadband_dps,
-         valid_count);
   return BMI2_OK;
 }
 
@@ -561,14 +480,9 @@ int8_t imu_heading_init(void)
   imu_heading_dev.dummy_byte = imu_heading_read_dummy;
 
   result = bmi270_init(&imu_heading_dev);
-  printf("bmi270_init rslt=%d chip_id=0x%02X load_status=0x%02X\r\n",
-         result,
-         imu_heading_dev.chip_id,
-         imu_heading_dev.load_status);
   if(result == BMI2_OK)
   {
     result = imu_heading_config_sensor();
-    printf("bmi270_heading_config rslt=%d\r\n", result);
   }
   if(result == BMI2_OK)
   {
@@ -585,8 +499,6 @@ int8_t imu_heading_update(float dt_s)
 {
   int8_t result;
   struct bmi2_sens_data sensor_data;
-  float gyro_x_dps;
-  float gyro_y_dps;
   float gyro_z_dps;
   float rate_delta_dps;
   float limited_rate_dps;
@@ -608,18 +520,10 @@ int8_t imu_heading_update(float dt_s)
   if((sensor_data.status & BMI2_DRDY_GYR) != 0U)
   {
     imu_heading_gyro_age_ms = 0U;
-    gyro_x_dps = imu_heading_raw_to_dps(sensor_data.gyr.x) -
-                 imu_heading_gyro_x_zero_dps;
-    gyro_y_dps = imu_heading_raw_to_dps(sensor_data.gyr.y) -
-                 imu_heading_gyro_y_zero_dps;
     gyro_z_dps = imu_heading_raw_to_dps(sensor_data.gyr.z) -
                  imu_heading_gyro_z_zero_dps;
-    /* 将三轴角速度投影到上电静止时由重力确定的车辆竖直轴。 */
-    /* 车辆坐标约定：X 向前、Y 向左、Z 向上，车头左转为正。 */
-    imu_heading_raw_rate_dps = IMU_HEADING_YAW_SIGN *
-        ((gyro_x_dps * imu_heading_vertical_x) +
-         (gyro_y_dps * imu_heading_vertical_y) +
-         (gyro_z_dps * imu_heading_vertical_z));
+    /* BMI270安装坐标已冻结为Z向上，左转为正。 */
+    imu_heading_raw_rate_dps = IMU_HEADING_YAW_SIGN * gyro_z_dps;
 
     /* 先限制单周期突变，再按实际采样周期执行 5Hz 一阶低通。 */
     rate_delta_dps = imu_heading_raw_rate_dps -
@@ -645,15 +549,6 @@ int8_t imu_heading_update(float dt_s)
       imu_heading_rate_dps = imu_heading_filtered_rate_dps;
     }
 
-    imu_heading_yaw_deg += imu_heading_rate_dps * dt_s;
-    while(imu_heading_yaw_deg > 180.0f)
-    {
-      imu_heading_yaw_deg -= 360.0f;
-    }
-    while(imu_heading_yaw_deg < -180.0f)
-    {
-      imu_heading_yaw_deg += 360.0f;
-    }
   }
   else
   {
@@ -693,34 +588,9 @@ int8_t imu_heading_update(float dt_s)
   return BMI2_OK;
 }
 
-void imu_heading_reset(void)
-{
-  imu_heading_yaw_deg = 0.0f;
-}
-
-float imu_heading_get_yaw_deg(void)
-{
-  return imu_heading_yaw_deg;
-}
-
 float imu_heading_get_rate_dps(void)
 {
   return imu_heading_rate_dps;
-}
-
-float imu_heading_get_raw_rate_dps(void)
-{
-  return imu_heading_raw_rate_dps;
-}
-
-float imu_heading_get_filtered_rate_dps(void)
-{
-  return imu_heading_filtered_rate_dps;
-}
-
-float imu_heading_get_deadband_dps(void)
-{
-  return imu_heading_deadband_dps;
 }
 
 int16_t imu_heading_get_linear_accel_x_mg(void)

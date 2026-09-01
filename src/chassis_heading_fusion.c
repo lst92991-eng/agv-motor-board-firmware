@@ -65,10 +65,6 @@ void chassis_heading_fusion_update(chassis_heading_fusion_t *fusion,
     return;
   }
 
-  fusion->gyro_rate_dps = gyro_rate_dps;
-  fusion->gyro_yaw_unwrapped_deg += gyro_rate_dps * dt_s;
-  fusion->gyro_yaw_deg = chassis_heading_wrap_deg(
-      fusion->gyro_yaw_unwrapped_deg);
   predicted_fused_yaw_unwrapped_deg =
       fusion->fused_yaw_unwrapped_deg + (gyro_rate_dps * dt_s);
 
@@ -76,10 +72,7 @@ void chassis_heading_fusion_update(chassis_heading_fusion_t *fusion,
   if(chassis_heading_abs_float(encoder_rate_dps) <=
      fusion->max_encoder_rate_dps)
   {
-    fusion->encoder_rate_dps = encoder_rate_dps;
     fusion->encoder_yaw_unwrapped_deg += encoder_delta_yaw_deg;
-    fusion->encoder_yaw_deg = chassis_heading_wrap_deg(
-        fusion->encoder_yaw_unwrapped_deg);
     correction_gain = dt_s / (fusion->correction_tau_s + dt_s);
     correction_error_deg = fusion->encoder_yaw_unwrapped_deg -
                            predicted_fused_yaw_unwrapped_deg;
@@ -89,7 +82,6 @@ void chassis_heading_fusion_update(chassis_heading_fusion_t *fusion,
   }
   else
   {
-    fusion->encoder_rate_dps = 0.0f;
     fusion->fused_yaw_unwrapped_deg = predicted_fused_yaw_unwrapped_deg;
     fusion->rejected_encoder_samples++;
   }
@@ -97,8 +89,6 @@ void chassis_heading_fusion_update(chassis_heading_fusion_t *fusion,
   fusion->fused_yaw_deg = chassis_heading_wrap_deg(
       fusion->fused_yaw_unwrapped_deg);
 
-  fusion->disagreement_deg = chassis_heading_wrap_deg(
-      fusion->gyro_yaw_deg - fusion->encoder_yaw_deg);
 }
 
 float chassis_heading_fusion_encoder_delta_deg(
@@ -160,14 +150,8 @@ void chassis_heading_fusion_reset(chassis_heading_fusion_t *fusion)
     return;
   }
 
-  fusion->gyro_yaw_deg = 0.0f;
-  fusion->encoder_yaw_deg = 0.0f;
   fusion->fused_yaw_deg = 0.0f;
-  fusion->gyro_yaw_unwrapped_deg = 0.0f;
   fusion->encoder_yaw_unwrapped_deg = 0.0f;
   fusion->fused_yaw_unwrapped_deg = 0.0f;
-  fusion->gyro_rate_dps = 0.0f;
-  fusion->encoder_rate_dps = 0.0f;
-  fusion->disagreement_deg = 0.0f;
   fusion->rejected_encoder_samples = 0UL;
 }

@@ -11,7 +11,6 @@ extern "C" {
 
 typedef enum
 {
-  MOTION_SOURCE_SERIAL = 1,
   MOTION_SOURCE_CANFD = 2,
   MOTION_SOURCE_LOCAL_SAFETY = 3
 } motion_command_source_t;
@@ -61,17 +60,6 @@ typedef struct
 typedef motion_command_handle_result_t (*motion_command_handler_t)(
     const motion_command_t *command,
     void *context);
-
-/* 检查统一运动命令的版本、序号和参数范围。 */
-motion_command_error_t motion_command_validate(const motion_command_t *command);
-
-/* 返回统一命令的固定英文名称，供串口ACK和日志使用。 */
-const char *motion_command_get_name(motion_command_type_t type);
-
-/* 只有控制任务确认RELEASE已执行后，协议层才撤销session。 */
-uint8_t motion_command_releases_session(
-    motion_command_type_t type,
-    motion_command_handle_result_t result);
 
 #ifdef __cplusplus
 }

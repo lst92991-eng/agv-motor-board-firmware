@@ -261,77 +261,14 @@ static void test_velocity_ingress_mailbox(void)
               "capture-based TTL expires on original boundary");
 }
 
-static void test_velocity_stop_order_barriers(void)
+static void test_arrival_order(void)
 {
-  motion_reference_ingress_mailbox_t mailbox = {0};
-  motion_reference_ingress_t ingress;
-  motion_reference_receiver_t receiver = {0};
-  agv_motion_reference_t latest;
-  uint8_t payload[AGV_MOTION_REFERENCE_PAYLOAD_SIZE];
-
-  motion_reference_ingress_mailbox_reset(&mailbox);
-  make_payload(payload, 7U, 1U, 100U, 100, 0, 400U, 500U);
-  motion_reference_ingress_mailbox_publish(&mailbox, payload, 10U, 1U);
-  make_payload(payload, 7U, 2U, 100U, 200, 0, 400U, 500U);
-  motion_reference_ingress_mailbox_publish(&mailbox, payload, 12U, 3U);
-  expect_true(motion_reference_ingress_mailbox_take(
-                  &mailbox, &ingress) != 0U &&
-                  motion_reference_is_after_barrier(
-                      ingress.arrival_order, 2U, 1U) != 0U,
-              "v1 STOP v2 retains only velocity after barrier");
-  motion_reference_receiver_reset(&receiver, 7U);
-  motion_reference_receiver_invalidate_latest(&receiver);
-  expect_true(motion_reference_receiver_accept(
-                  &receiver, ingress.payload,
-                  AGV_MOTION_REFERENCE_PAYLOAD_SIZE,
-                  ingress.receive_ms, 100U) ==
-              MOTION_REFERENCE_RECEIVER_ACCEPTED,
-              "newer v2 may run only after STOP barrier");
-
-  motion_reference_ingress_mailbox_reset(&mailbox);
-  make_payload(payload, 7U, 3U, 100U, 100, 0, 400U, 500U);
-  motion_reference_ingress_mailbox_publish(&mailbox, payload, 20U, 4U);
-  expect_true(motion_reference_ingress_mailbox_take(
-                  &mailbox, &ingress) != 0U &&
-                  motion_reference_is_after_barrier(
-                      ingress.arrival_order, 5U, 1U) == 0U,
-              "v1 STOP discards velocity before barrier");
-  expect_true(motion_reference_is_after_barrier(
-                  ingress.arrival_order, 0U, 0U) != 0U,
-              "velocity survives when the batch has no barrier");
-  motion_reference_receiver_invalidate_latest(&receiver);
-  expect_true(motion_reference_receiver_get_latest(
-                  &receiver, 20U, &latest) == 0U &&
-                  motion_reference_ingress_mailbox_take(
-                      &mailbox, &ingress) == 0U,
-              "STOP without later velocity cannot recover motion");
-}
-
-static void test_motion_reference_snapshot_gate(void)
-{
-  agv_motion_reference_t reference = body_reference(100, 0);
-
-  expect_true(motion_reference_snapshot_is_visible(
-                  10U, 10U, 10U, 11U, 11U, 1U, 1U, 0U) != 0U,
-              "stable snapshot after barrier is visible");
-  expect_true(motion_reference_snapshot_is_visible(
-                  10U, 12U, 12U, 13U, 13U, 1U, 1U, 0U) == 0U,
-              "barrier change during snapshot is rejected");
-  expect_true(motion_reference_snapshot_is_visible(
-                  12U, 12U, 10U, 13U, 13U, 1U, 1U, 0U) == 0U,
-              "pending barrier is rejected");
-  expect_true(motion_reference_snapshot_is_visible(
-                  10U, 10U, 10U, 11U, 12U, 1U, 1U, 0U) == 0U,
-              "accepted order change during snapshot is rejected");
-  expect_true(motion_reference_miss_requires_fault(
-                  &reference, 299U, 1U) == 0U,
-              "transient snapshot miss before TTL is non-latching");
-  expect_true(motion_reference_miss_requires_fault(
-                  &reference, 300U, 1U) != 0U,
-              "exact TTL expiry requires a communication fault");
-  expect_true(motion_reference_miss_requires_fault(
-                  &reference, 101U, 0U) != 0U,
-              "lost session requires a communication fault");
+  expect_true(motion_reference_is_after(11U, 10U) != 0U,
+              "reference after command barrier is visible");
+  expect_true(motion_reference_is_after(10U, 10U) == 0U,
+              "reference at command barrier is hidden");
+  expect_true(motion_reference_is_after(0U, UINT32_MAX) != 0U,
+              "arrival order wraps forward");
 }
 
 static void test_control_math(void)
@@ -497,8 +434,7 @@ int main(void)
   test_sequence_rules();
   test_session_reset();
   test_velocity_ingress_mailbox();
-  test_velocity_stop_order_barriers();
-  test_motion_reference_snapshot_gate();
+  test_arrival_order();
   test_control_math();
   test_stateful_reference_control();
   if(failures != 0)

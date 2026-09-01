@@ -9,15 +9,9 @@ extern "C" {
 
 typedef struct
 {
-  float gyro_yaw_deg;
-  float encoder_yaw_deg;
   float fused_yaw_deg;
-  float gyro_yaw_unwrapped_deg;
   float encoder_yaw_unwrapped_deg;
   float fused_yaw_unwrapped_deg;
-  float gyro_rate_dps;
-  float encoder_rate_dps;
-  float disagreement_deg;
   float correction_tau_s;
   float max_encoder_rate_dps;
   uint32_t rejected_encoder_samples;

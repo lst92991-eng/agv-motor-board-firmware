@@ -221,51 +221,7 @@ uint8_t motion_reference_ingress_mailbox_take(
   return 0U;
 }
 
-uint8_t motion_reference_arrived_before(uint32_t first,
-                                        uint32_t second)
+uint8_t motion_reference_is_after(uint32_t value, uint32_t barrier)
 {
-  return (((int32_t)(first - second)) < 0) ? 1U : 0U;
-}
-
-uint8_t motion_reference_is_after_barrier(uint32_t ingress_order,
-                                          uint32_t barrier_order,
-                                          uint8_t barrier_valid)
-{
-  if(barrier_valid == 0U)
-  {
-    return 1U;
-  }
-  return motion_reference_arrived_before(barrier_order, ingress_order);
-}
-
-uint8_t motion_reference_snapshot_is_visible(
-    uint32_t barrier_before,
-    uint32_t barrier_after,
-    uint32_t processed_after,
-    uint32_t accepted_before,
-    uint32_t accepted_after,
-    uint8_t session_valid,
-    uint8_t motion_active,
-    uint8_t busoff)
-{
-  if((session_valid == 0U) || (motion_active == 0U) || (busoff != 0U) ||
-     (barrier_before != barrier_after) ||
-     (processed_after != barrier_after) ||
-     (accepted_before == 0U) || (accepted_before != accepted_after))
-  {
-    return 0U;
-  }
-  return motion_reference_is_after_barrier(
-      accepted_after, barrier_after,
-      (barrier_after != 0U) ? 1U : 0U);
-}
-
-uint8_t motion_reference_miss_requires_fault(
-    const agv_motion_reference_t *last_reference,
-    uint32_t now_ms,
-    uint8_t session_valid)
-{
-  return ((session_valid == 0U) ||
-          (agv_motion_reference_is_fresh(last_reference, now_ms) == 0U)) ?
-         1U : 0U;
+  return (((int32_t)(value - barrier)) > 0) ? 1U : 0U;
 }

@@ -15,9 +15,6 @@ void motor_speed_control_init(void);
 /* 设置左右输出轴目标转速，单位为 RPM。 */
 void motor_speed_control_set_targets(float left_target_rpm, float right_target_rpm);
 
-/* 等待20ms控制周期，更新编码器速度、PI 和电机 PWM。 */
-void motor_speed_control_update(void);
-
 /* 立即执行一次速度环计算，不在函数内部等待控制周期。 */
 void motor_speed_control_update_now(void);
 
